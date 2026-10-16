@@ -1,0 +1,296 @@
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Mosaic navigation">
+    <a class="brand" href="#top" aria-label="Mosaic home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M4 8.5h16v11H4zM4 8.5l2-4h4l-2 4m2 0 2-4h4l-2 4m2 0 2-4h4l-2 4M8 12v4m4-4v4m4-4v4" />
+        </svg>
+      </span>
+      <span>mosaic<span class="brand-period">.</span></span>
+    </a>
+
+    <div class="side-label">YOUR SPACE</div>
+    <nav class="side-nav" aria-label="Main navigation">
+      <a class="nav-link active" href="#discover" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Zm7 12 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z" /></svg>
+        Discover
+      </a>
+      <button class="nav-link" type="button" (click)="showTopRated()">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" /></svg>
+        Top rated
+      </button>
+      <button
+        class="nav-link"
+        [class.active]="showWatchlist()"
+        [attr.aria-pressed]="showWatchlist()"
+        type="button"
+        (click)="toggleWatchlist()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-4-6 4V4.5Z" /></svg>
+        Watchlist
+        <span class="nav-count">{{ savedCount() }}</span>
+      </button>
+    </nav>
+
+    <div class="side-label genre-label">BROWSE BY MOOD</div>
+    <nav class="genre-nav" aria-label="Browse by genre">
+      @for (genre of genres.slice(1); track genre) {
+        <button
+          class="genre-link"
+          [class.selected]="activeGenre() === genre"
+          type="button"
+          (click)="toggleGenre(genre)"
+        >
+          <span [class]="'genre-dot dot-' + genre.toLowerCase()" aria-hidden="true"></span>
+          {{ genre }}
+        </button>
+      }
+    </nav>
+
+    <div class="sidebar-note">
+      <span class="note-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 7.5 14 4v15L4 16V7.5Zm10 2.1 5-2.1v9l-5-1.9M7 8.5v6" /></svg>
+      </span>
+      <p>Your next favorite is out there.</p>
+      <span>Keep looking.</span>
+    </div>
+    <div class="profile-chip">
+      <div class="profile-avatar" aria-hidden="true">M</div>
+      <div><strong>Movie lover</strong><span>Guest profile</span></div>
+      <span class="profile-caret" aria-hidden="true">⌄</span>
+    </div>
+  </aside>
+
+  <main id="top" class="main-content">
+    <header class="topbar">
+      <div class="breadcrumb"><span>YOUR SPACE</span><b>/</b> Discover</div>
+      <label class="search-box">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3" /><path d="m16 16 4.3 4.3" /></svg>
+        <input
+          aria-label="Search movies"
+          type="search"
+          placeholder="Find a film, director..."
+          [value]="search()"
+          (input)="onSearchInput($event)"
+        />
+        <kbd>/</kbd>
+      </label>
+      <button class="avatar-small" type="button" aria-label="Guest profile">M</button>
+    </header>
+
+    <div class="content-wrap" id="discover">
+      <section class="intro-row">
+        <div>
+          <div class="eyebrow"><span class="eyebrow-line"></span> THE GOOD STUFF, RIGHT THIS WAY</div>
+          <h1>Find your <em>next</em><br />favorite film.</h1>
+          <p class="intro-copy">A little bit of everything, picked for your kind of night.</p>
+        </div>
+        <div class="connection-status" [class.is-error]="loadError()" role="status">
+          <span class="status-dot"></span>
+          @if (isLoading()) {
+            Loading collection
+          } @else if (loadError()) {
+            Backend unavailable
+          } @else {
+            Connected to your collection
+          }
+        </div>
+      </section>
+
+      @if (featuredMovie(); as featured) {
+        <section
+          class="feature-banner"
+          [style.background-image]="featuredBackground(featured)"
+          aria-label="Featured film"
+        >
+          <div class="feature-copy">
+            <div class="feature-kicker">
+              <span aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z" /></svg>
+              </span>
+              IN THE SPOTLIGHT <i></i> FEATURED FILM
+            </div>
+            <h2>{{ featured.title }}</h2>
+            <div class="feature-meta">
+              <span>{{ featured.year || '—' }}</span><i></i>
+              <span>{{ featured.genres.slice(0, 2).join(' / ') || 'FEATURED' }}</span><i></i>
+              <span class="feature-rating">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" /></svg>
+                {{ featured.rating.toFixed(1) }}
+              </span>
+            </div>
+            <p>{{ featured.plot || 'A story worth staying in for.' }}</p>
+            <button class="feature-button" type="button" (click)="openMovie(featured)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z" /></svg>
+              Explore film
+            </button>
+          </div>
+          <span class="feature-index">01 <i></i> {{ movies().length.toString().padStart(2, '0') }}</span>
+        </section>
+      }
+
+      <section class="catalog-section" aria-label="Movie catalog">
+        <div class="catalog-heading">
+          <div>
+            <div class="eyebrow small-eyebrow">A GOOD PLACE TO START</div>
+            <h2>
+              @if (showWatchlist()) {
+                Your watchlist
+              } @else if (search()) {
+                Search results
+              } @else if (activeGenre() === 'All films') {
+                A little of everything
+              } @else {
+                {{ activeGenre() }}, for you
+              }
+            </h2>
+          </div>
+          <div class="catalog-controls">
+            <span class="result-count">{{ filteredMovies().length }} FILMS</span>
+            <button
+              class="sort-button"
+              [class.is-active]="sortByRating()"
+              [attr.aria-pressed]="sortByRating()"
+              type="button"
+              (click)="toggleSort()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10m-7 5h4" /><circle cx="8" cy="7" r="2" /><circle cx="15" cy="12" r="2" /></svg>
+              {{ sortByRating() ? 'Top rated' : 'Recently added' }} <span>⌄</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="genre-pills" aria-label="Filter movies by genre">
+          @for (genre of genres; track genre) {
+            <button
+              class="genre-pill"
+              [class.is-active]="activeGenre() === genre"
+              [attr.aria-pressed]="activeGenre() === genre"
+              type="button"
+              (click)="chooseGenre(genre)"
+            >
+              {{ genre }}
+            </button>
+          }
+        </div>
+
+        @if (filteredMovies().length > 0) {
+          <div class="movie-grid">
+            @for (movie of filteredMovies(); track movie.id; let index = $index) {
+              <article class="movie-card" [style.animation-delay]="index * 55 + 'ms'">
+                <button
+                  class="poster-button"
+                  type="button"
+                  [attr.aria-label]="'View ' + movie.title"
+                  (click)="openMovie(movie)"
+                >
+                  @if (movie.posterUrl) {
+                    <img class="poster-image" [src]="movie.posterUrl" [alt]="movie.title + ' film still'" loading="lazy" />
+                  } @else {
+                    <span class="poster-placeholder">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 14 4v15L4 16V7.5Zm10 2.1 5-2.1v9l-5-1.9M7 8.5v6" /></svg>
+                      <span>{{ movie.title }}</span>
+                    </span>
+                  }
+                  <span class="poster-overlay"><span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z" /></svg>
+                    View film
+                  </span></span>
+                  <span class="poster-rating">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" /></svg>
+                    {{ movie.rating.toFixed(1) }}
+                  </span>
+                </button>
+                <div class="movie-info">
+                  <div class="movie-title-row">
+                    <button class="movie-title" type="button" (click)="openMovie(movie)">{{ movie.title }}</button>
+                    <button
+                      class="save-button"
+                      [class.saved]="isSaved(movie.id)"
+                      [attr.aria-label]="isSaved(movie.id) ? 'Remove ' + movie.title + ' from watchlist' : 'Add ' + movie.title + ' to watchlist'"
+                      [attr.aria-pressed]="isSaved(movie.id)"
+                      type="button"
+                      (click)="toggleSaved(movie.id)"
+                    >
+                      @if (isSaved(movie.id)) {
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+                      } @else {
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-4-6 4V4.5Z" /></svg>
+                      }
+                    </button>
+                  </div>
+                  <div class="movie-subline">
+                    <span>{{ movie.year || '—' }}</span><i></i>{{ movie.genres.slice(0, 2).join(' · ') }}
+                  </div>
+                </div>
+              </article>
+            }
+          </div>
+        } @else {
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3" /><path d="m16 16 4.3 4.3" /></svg>
+            <strong>
+              @if (isLoading()) {
+                Loading films
+              } @else if (loadError()) {
+                Could not load films
+              } @else {
+                No films found
+              }
+            </strong>
+            <span>
+              @if (isLoading()) {
+                Connecting to your collection...
+              } @else if (loadError()) {
+                {{ loadError() }}
+              } @else {
+                Try another title or clear the genre filter.
+              }
+            </span>
+            @if (loadError()) {
+              <button class="sort-button" type="button" (click)="loadMovies()">Try again</button>
+            }
+          </div>
+        }
+      </section>
+
+      <footer class="page-footer">
+        <span>MOSAIC <i></i> FILM, FOUND.</span>
+        <span>MADE FOR THE LOVE OF A GOOD STORY</span>
+      </footer>
+    </div>
+  </main>
+
+  @if (selectedMovie(); as movie) {
+    <div class="dialog-backdrop" (click)="closeOnBackdrop($event)">
+      <section class="detail-dialog" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+        <button class="dialog-close" type="button" aria-label="Close film details" (click)="closeMovie()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+        <div class="detail-hero" [style.background-image]="detailBackground(movie)">
+          <span class="detail-tag">FILM DETAILS</span>
+          <h2 id="detail-title">{{ movie.title }}</h2>
+          <div class="detail-meta">
+            <span>{{ movie.year || '—' }}</span><i></i>
+            {{ movie.runtime ? movie.runtime + ' min' : 'Feature film' }}<i></i>
+            <span class="detail-rating">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" /></svg>
+              {{ movie.rating.toFixed(1) }}
+            </span>
+          </div>
+        </div>
+        <div class="detail-body">
+          <div class="detail-description">
+            <div class="detail-section-label">THE STORY</div>
+            <p>{{ movie.plot || 'No synopsis is available for this film yet.' }}</p>
+            <div class="film-facts">
+              <div><span>DIRECTOR</span><strong>{{ movie.director || 'Not listed' }}</strong></div>
+              <div><span>GENRE</span><strong>{{ movie.genres.join(', ') || 'Not listed' }}</strong></div>
+              <div><span>STARRING</span><strong>{{ movie.cast.join(', ') || 'Not listed' }}</strong></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  }
+</div>
