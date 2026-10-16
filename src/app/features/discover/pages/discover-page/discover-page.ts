@@ -1,5 +1,5 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 
@@ -33,7 +33,10 @@ function asStringArray(value: unknown): string[] {
   }
 
   return typeof value === 'string'
-    ? value.split(',').map((item) => item.trim()).filter(Boolean)
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
     : [];
 }
 
@@ -89,11 +92,15 @@ function readSavedMovieIds(): string[] {
 }
 
 @Component({
+  host: {
+    '(document:keydown.escape)': 'closeMovie()',
+  },
   selector: 'app-discover-page',
   templateUrl: './discover-page.html',
 })
 export class DiscoverPage {
   private readonly http = inject(HttpClient);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly savedMovieIds = signal(readSavedMovieIds());
 
   protected readonly genres = genres;
@@ -149,7 +156,7 @@ export class DiscoverPage {
       .get<unknown>('/api/movies', { params: { limit: '30' } })
       .pipe(
         map((payload) => unwrapMovies(payload).map(normalizeMovie)),
-        takeUntilDestroyed(),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: (movies) => this.movies.set(movies),
@@ -200,9 +207,7 @@ export class DiscoverPage {
 
   protected toggleSaved(movieId: string): void {
     this.savedMovieIds.update((savedIds) =>
-      savedIds.includes(movieId)
-        ? savedIds.filter((id) => id !== movieId)
-        : [...savedIds, movieId],
+      savedIds.includes(movieId) ? savedIds.filter((id) => id !== movieId) : [...savedIds, movieId],
     );
   }
 
