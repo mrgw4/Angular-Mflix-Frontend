@@ -67,8 +67,13 @@
       <span>Keep looking.</span>
     </div>
     <div class="profile-chip">
-      <div class="profile-avatar" aria-hidden="true">M</div>
-      <div><strong>Movie lover</strong><span>Guest profile</span></div>
+      <div class="profile-avatar" aria-hidden="true">
+        {{ authSession()?.user?.name?.charAt(0)?.toUpperCase() || 'M' }}
+      </div>
+      <div>
+        <strong>{{ authSession()?.user?.name || 'Movie lover' }}</strong>
+        <span>{{ authSession()?.user?.email || 'Guest profile' }}</span>
+      </div>
       <span class="profile-caret" aria-hidden="true">⌄</span>
     </div>
   </aside>
@@ -90,7 +95,159 @@
         />
         <kbd>/</kbd>
       </label>
-      <button class="avatar-small" type="button" aria-label="Guest profile">M</button>
+      <div class="account-menu">
+        <button
+          class="avatar-small"
+          type="button"
+          aria-controls="account-dropdown"
+          [attr.aria-expanded]="accountMenuOpen()"
+          [attr.aria-label]="
+            authSession()
+              ? 'Account menu for ' + authSession()!.user.name
+              : 'Open login menu'
+          "
+          (click)="toggleAccountMenu()"
+        >
+          @if (authSession(); as session) {
+            {{ session.user.name.charAt(0).toUpperCase() }}
+          } @else {
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 8V5.5A2.5 2.5 0 0 0 12.5 3h-7A2.5 2.5 0 0 0 3 5.5v13A2.5 2.5 0 0 0 5.5 21h7a2.5 2.5 0 0 0 2.5-2.5V16m-4-4h10m0 0-4-4m4 4-4 4" />
+            </svg>
+          }
+        </button>
+        @if (accountMenuOpen()) {
+          <section class="account-dropdown" id="account-dropdown" aria-label="Account menu">
+            @if (authSession(); as session) {
+              <div class="account-heading">
+                <strong>{{ session.user.name }}</strong>
+                <span>{{ session.user.email }}</span>
+              </div>
+              @if (authError()) {
+                <p class="auth-error" role="alert">{{ authError() }}</p>
+              }
+              <button
+                class="account-action"
+                type="button"
+                [disabled]="authLoading()"
+                (click)="submitLogout()"
+              >
+                {{ authLoading() ? 'Signing out…' : 'Log out' }}
+              </button>
+            } @else if (authView() === 'register') {
+              <form class="account-form" (submit)="submitRegistration($event)">
+                <div class="account-heading">
+                  <strong>Create an account</strong>
+                  <span>Join Mosaic to save your favorites</span>
+                </div>
+                @if (authError()) {
+                  <p class="auth-error" role="alert">{{ authError() }}</p>
+                }
+                <label>
+                  Username
+                  <input
+                    autocomplete="username"
+                    required
+                    minlength="4"
+                    maxlength="25"
+                    type="text"
+                    [value]="authUsername()"
+                    (input)="onAuthInput($event, 'username')"
+                  />
+                </label>
+                <label>
+                  Email
+                  <input
+                    autocomplete="email"
+                    required
+                    type="email"
+                    [value]="authEmail()"
+                    (input)="onAuthInput($event, 'email')"
+                  />
+                </label>
+                <label>
+                  Password
+                  <input
+                    autocomplete="new-password"
+                    required
+                    minlength="6"
+                    maxlength="100"
+                    type="password"
+                    [value]="authPassword()"
+                    (input)="onAuthInput($event, 'password')"
+                  />
+                </label>
+                <label>
+                  Confirm password
+                  <input
+                    autocomplete="new-password"
+                    required
+                    minlength="6"
+                    maxlength="100"
+                    type="password"
+                    [value]="confirmPassword()"
+                    (input)="onAuthInput($event, 'confirmPassword')"
+                  />
+                </label>
+                <button class="account-action" type="submit" [disabled]="authLoading()">
+                  {{ authLoading() ? 'Creating account…' : 'Create account' }}
+                </button>
+                <button
+                  class="account-switch"
+                  type="button"
+                  (click)="switchAuthView('login')"
+                >
+                  Already have an account? Log in
+                </button>
+              </form>
+            } @else {
+              <form class="account-form" (submit)="submitLogin($event)">
+                <div class="account-heading">
+                  <strong>Welcome back</strong>
+                  <span>Sign in to your account</span>
+                </div>
+                @if (authError()) {
+                  <p class="auth-error" role="alert">{{ authError() }}</p>
+                }
+                <label>
+                  Email
+                  <input
+                    autocomplete="email"
+                    required
+                    type="email"
+                    [value]="authEmail()"
+                    (input)="onAuthInput($event, 'email')"
+                  />
+                </label>
+                <label>
+                  Password
+                  <input
+                    autocomplete="current-password"
+                    required
+                    minlength="6"
+                    type="password"
+                    [value]="authPassword()"
+                    (input)="onAuthInput($event, 'password')"
+                  />
+                </label>
+                @if (authSuccessMessage()) {
+                  <p class="auth-success" role="status">{{ authSuccessMessage() }}</p>
+                }
+                <button class="account-action" type="submit" [disabled]="authLoading()">
+                  {{ authLoading() ? 'Signing in…' : 'Log in' }}
+                </button>
+                <button
+                  class="account-switch"
+                  type="button"
+                  (click)="switchAuthView('register')"
+                >
+                  Don’t have an account? Create one
+                </button>
+              </form>
+            }
+          </section>
+        }
+      </div>
     </header>
 
     <div class="content-wrap" id="discover">
@@ -363,6 +520,75 @@
               <div>
                 <span>STARRING</span><strong>{{ movie.cast.join(', ') || 'Not listed' }}</strong>
               </div>
+            </div>
+          </div>
+          <div class="comments-panel">
+            <div class="comments-heading">
+              <div>
+                <div class="detail-section-label">AFTER THE CREDITS</div>
+                <h3>Talk about it</h3>
+              </div>
+              <span>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4v-4.2a2.5 2.5 0 0 1-2-2.3v-8Z" />
+                </svg>
+                {{ comments().length }}
+              </span>
+            </div>
+            <form class="comment-form" (submit)="submitComment($event)">
+              <input
+                aria-label="Your name"
+                autocomplete="name"
+                required
+                maxlength="60"
+                placeholder="Your name"
+                [value]="commentName()"
+                (input)="onCommentNameInput($event)"
+              />
+              <textarea
+                aria-label="Your comment"
+                required
+                maxlength="1000"
+                placeholder="What stayed with you?"
+                rows="3"
+                [value]="commentText()"
+                (input)="onCommentTextInput($event)"
+              ></textarea>
+              @if (commentError()) {
+                <p class="comment-error" role="alert">{{ commentError() }}</p>
+              }
+              <button class="comment-submit" type="submit" [disabled]="commentLoading()">
+                {{ commentLoading() ? 'Posting...' : 'Post comment' }}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m21 3-7.2 18-3.1-7.7L3 10.2 21 3Zm0 0L10.7 13.3" />
+                </svg>
+              </button>
+            </form>
+            <div class="comment-list" aria-live="polite">
+              @if (commentsLoading()) {
+                <div class="no-comments">Loading comments...</div>
+              } @else if (commentLoadError()) {
+                <div class="no-comments comment-error" role="alert">{{ commentLoadError() }}</div>
+              } @else if (comments().length) {
+                @for (comment of comments(); track comment.id) {
+                  <article class="comment-item">
+                    <div class="comment-avatar">{{ comment.name.charAt(0).toUpperCase() }}</div>
+                    <div>
+                      <div class="comment-author">
+                        {{ comment.name }} <time>{{ commentDate(comment.date) }}</time>
+                      </div>
+                      <p>{{ comment.text }}</p>
+                    </div>
+                  </article>
+                }
+              } @else {
+                <div class="no-comments">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 20.2 4.8 13A4.5 4.5 0 0 1 11.2 6.7L12 7.5l.8-.8a4.5 4.5 0 0 1 6.4 6.3L12 20.2Z" />
+                  </svg>
+                  Be the first to leave a thought.
+                </div>
+              }
             </div>
           </div>
         </div>
