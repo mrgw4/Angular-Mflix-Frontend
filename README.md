@@ -49,6 +49,12 @@ Run unit tests:
 npm test
 ```
 
+Print per-file text coverage and the summary (90% minimum branch coverage):
+
+```bash
+npm run test:coverage
+```
+
 Run browser tests (install Chromium once if needed):
 
 ```bash
@@ -97,7 +103,9 @@ The discovery page includes catalog search, genre filters, rating/year sorting, 
 
 The development proxy routes `/api` requests to `http://localhost:5000`. For production, route the same API paths to the backend and enable CORS for the frontend origin when they are hosted separately.
 
-The discovery page's Jasmine spec covers comment loading/posting and the registration, login, session persistence, and logout flows.
+The Jasmine suite covers discovery filtering and sorting, watchlist persistence, movie and comment loading states, comment submission, and account registration/login/logout success and error paths. Playwright runs the browser flow in Chromium with the movie, comment, and account APIs stubbed, so it does not require the backend or MongoDB.
+
+Tests are organized under `tests/`: Jasmine unit specs live in `tests/unit/` (with core service and feature specs grouped by area), and Playwright browser specs live in `tests/e2e/`.
 
 ## Additional Resources
 

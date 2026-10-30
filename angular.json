@@ -37,9 +37,7 @@
                 "input": "public"
               }
             ],
-            "styles": [
-              "src/styles.scss"
-            ]
+            "styles": ["src/styles.scss"]
           },
           "configurations": {
             "production": {
@@ -83,7 +81,12 @@
         "test": {
           "builder": "@angular/build:unit-test",
           "options": {
-            "runner": "karma"
+            "runner": "karma",
+            "runnerConfig": "karma.conf.js",
+            "include": ["../tests/unit/**/*.spec.ts"],
+            "coverageThresholds": {
+              "branches": 90
+            }
           }
         }
       }
