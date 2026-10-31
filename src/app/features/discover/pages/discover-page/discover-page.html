@@ -21,12 +21,6 @@
         </svg>
         Discover
       </a>
-      <button class="nav-link" type="button" (click)="showTopRated()">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" />
-        </svg>
-        Top rated
-      </button>
       <button
         class="nav-link"
         [class.active]="showWatchlist()"
@@ -43,19 +37,37 @@
     </nav>
 
     <div class="side-label genre-label">BROWSE BY MOOD</div>
-    <nav class="genre-nav" aria-label="Browse by genre">
-      @for (genre of genres.slice(1); track genre) {
+    <section class="genre-picker" aria-label="Genre browser">
+      <label class="genre-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="10.8" cy="10.8" r="6.3" />
+          <path d="m16 16 4.3 4.3" />
+        </svg>
+        <input aria-label="Search genres" type="search" placeholder="Search genres" disabled />
+      </label>
+      <nav class="genre-nav" aria-label="Browse by genre">
         <button
           class="genre-link"
-          [class.selected]="activeGenre() === genre"
+          [class.selected]="activeGenre() === 'All films'"
           type="button"
-          (click)="toggleGenre(genre)"
+          (click)="chooseGenre('All films')"
         >
-          <span [class]="'genre-dot dot-' + genre.toLowerCase()" aria-hidden="true"></span>
-          {{ genre }}
+          <span class="genre-dot" aria-hidden="true"></span>
+          All films
         </button>
-      }
-    </nav>
+        @for (genre of genres.slice(1); track genre) {
+          <button
+            class="genre-link"
+            [class.selected]="activeGenre() === genre"
+            type="button"
+            (click)="toggleGenre(genre)"
+          >
+            <span [class]="'genre-dot dot-' + genre.toLowerCase()" aria-hidden="true"></span>
+            {{ genre }}
+          </button>
+        }
+      </nav>
+    </section>
 
     <div class="sidebar-note">
       <span class="note-icon" aria-hidden="true">
@@ -330,20 +342,35 @@
           </div>
           <div class="catalog-controls">
             <span class="result-count">{{ filteredMovies().length }} FILMS</span>
-            <button
-              class="sort-button"
-              [class.is-active]="sortByRating()"
-              [attr.aria-pressed]="sortByRating()"
-              type="button"
-              (click)="toggleSort()"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 7h16M7 12h10m-7 5h4" />
-                <circle cx="8" cy="7" r="2" />
-                <circle cx="15" cy="12" r="2" />
-              </svg>
-              {{ sortByRating() ? 'Top rated' : 'Recently added' }} <span>⌄</span>
-            </button>
+            <div class="catalog-control-actions" role="group" aria-label="Catalog search and sort">
+              <button class="advanced-search-toggle" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7h16M7 12h10m-7 5h4" />
+                  <circle cx="8" cy="7" r="2" />
+                  <circle cx="15" cy="12" r="2" />
+                </svg>
+                Advanced search
+              </button>
+              <label class="sort-control">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3" />
+                </svg>
+                <select class="sort-select" aria-label="Sort films" disabled>
+                  <option value="year">Newest year</option>
+                  <option value="imdbRating">Top rated</option>
+                  <option value="title">Title</option>
+                  <option value="runtime">Runtime</option>
+                  <option value="released">Release date</option>
+                  <option value="metacritic">Metacritic score</option>
+                </select>
+              </label>
+              <label class="sort-control">
+                <select class="sort-select" aria-label="Sort direction" disabled>
+                  <option value="desc">Highest / newest first</option>
+                  <option value="asc">Lowest / oldest first</option>
+                </select>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -441,6 +468,11 @@
               </article>
             }
           </div>
+          <nav class="pagination-controls" aria-label="Movie pages">
+            <button class="page-button" type="button" disabled>Previous</button>
+            <span>Page 1 of 1</span>
+            <button class="page-button" type="button" disabled>Next</button>
+          </nav>
         } @else {
           <div class="empty-state">
             <svg viewBox="0 0 24 24" aria-hidden="true">

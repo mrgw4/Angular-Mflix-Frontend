@@ -223,7 +223,7 @@ describe('DiscoverPage', () => {
     expect(window.localStorage.getItem('mosaic.auth.v1')).toBeNull();
   });
 
-  it('searches by title and director, filters by genre, and sorts by rating', () => {
+  it('searches by title and director, filters by genre, and shows the new catalog controls', () => {
     expect(movieTitles(fixture)).toEqual(['The Quiet Between', 'Moonlight', 'Arrival']);
 
     setInputValue(
@@ -263,19 +263,24 @@ describe('DiscoverPage', () => {
     fixture.detectChanges();
     expect(movieTitles(fixture).length).toBe(3);
 
-    (
-      Array.from(
-        fixture.nativeElement.querySelectorAll('.side-nav button') as NodeListOf<HTMLButtonElement>,
-      ).find((button) => button.textContent?.includes('Top rated')) as HTMLButtonElement
-    ).click();
-    fixture.detectChanges();
-    expect(movieTitles(fixture)).toEqual(['Arrival', 'The Quiet Between', 'Moonlight']);
     expect(
-      (fixture.nativeElement.querySelector('.sort-button') as HTMLButtonElement).textContent,
-    ).toContain('Top rated');
-    (fixture.nativeElement.querySelector('.sort-button') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    expect(movieTitles(fixture)).toEqual(['The Quiet Between', 'Moonlight', 'Arrival']);
+      fixture.nativeElement.querySelector('.side-nav')?.textContent,
+    ).not.toContain('Top rated');
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Search genres"]')?.disabled,
+    ).toBeTrue();
+    expect(
+      fixture.nativeElement.querySelector('.advanced-search-toggle')?.disabled,
+    ).toBeTrue();
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Sort films"]')?.disabled,
+    ).toBeTrue();
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Sort direction"]')?.disabled,
+    ).toBeTrue();
+    expect(
+      fixture.nativeElement.querySelectorAll('.pagination-controls .page-button:disabled').length,
+    ).toBe(2);
   });
 
   it('persists saved films and filters the catalog to the watchlist', () => {
