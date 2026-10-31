@@ -6,6 +6,7 @@ async function mockApi(page: Page): Promise<void> {
     const selectedGenres = params.get('genres')?.split(',') ?? [];
     const pageNumber = Number(params.get('page') ?? '1');
     const search = params.get('search')?.toLowerCase() ?? '';
+    const title = params.get('title')?.toLowerCase() ?? '';
     let movies = selectedGenres.includes('Sci-Fi')
       ? [
           {
@@ -54,7 +55,10 @@ async function mockApi(page: Page): Promise<void> {
       movies = movies.filter((movie) =>
         [movie.title, movie.director].some((value) => value.toLowerCase().includes(search)),
       );
-    } else if (pageNumber === 2 && selectedGenres.length === 0) {
+    }
+    if (title) {
+      movies = movies.filter((movie) => movie.title.toLowerCase().includes(title));
+    } else if (!search && pageNumber === 2 && selectedGenres.length === 0) {
       movies = [
         {
           _id: 'page-two',
@@ -71,7 +75,7 @@ async function mockApi(page: Page): Promise<void> {
       ];
     }
 
-    const total = search || selectedGenres.length > 0 ? movies.length : 12000;
+    const total = search || title || selectedGenres.length > 0 ? movies.length : 12000;
     const pages = Math.ceil(total / 30);
     return route.fulfill({
       status: 200,
@@ -186,6 +190,16 @@ test('discovers films, filters, saves, and opens movie details', async ({ page }
   ).toBeVisible();
   await page.getByRole('searchbox', { name: 'Search genres' }).fill('');
 
+  await page.getByRole('button', { name: 'Advanced search' }).click();
+  await page.getByPlaceholder('Film title').fill('Arrival');
+  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await expect(page.getByRole('heading', { name: 'Arrival' })).toBeVisible();
+  await expect(page.locator('.movie-card')).toHaveCount(1);
+  await expect(page.locator('.result-count')).toHaveText('1 FILMS');
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await expect(page.locator('.movie-card')).toHaveCount(2);
+  await expect(page.locator('.result-count')).toHaveText('12000 FILMS');
+
   await page.getByRole('searchbox', { name: 'Search movies' }).fill('Moonlight');
   await expect(page.locator('.movie-card')).toHaveCount(1);
   await page.getByRole('button', { name: 'Add Moonlight to watchlist' }).click();
@@ -208,6 +222,93 @@ test('posts a comment on a film', async ({ page }) => {
   await dialog.getByRole('textbox', { name: 'Your comment' }).fill('The ending stayed with me.');
   await dialog.getByRole('button', { name: 'Post comment' }).click();
   await expect(dialog.getByText('The ending stayed with me.')).toBeVisible();
+});
+
+test('validates advanced ranges and sends selected sort and filters to the backend', async ({ page }) => {
+  const movieRequests: URL[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/movies') {
+      movieRequests.push(url);
+    }
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Advanced search' }).click();
+
+  await page.getByRole('spinbutton', { name: 'Release year from' }).fill('2025');
+  await page.getByRole('spinbutton', { name: 'Release year to' }).fill('2000');
+  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Minimum year must be no greater than maximum year.',
+  );
+  expect(movieRequests).toHaveLength(1);
+
+  await page.getByRole('spinbutton', { name: 'Release year from' }).fill('2000');
+  await page.getByRole('spinbutton', { name: 'Release year to' }).fill('2025');
+  await page.getByPlaceholder('Film title').fill('Arrival');
+  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await expect(page.locator('.result-count')).toHaveText('1 FILMS');
+  await expect.poll(() => movieRequests.length).toBe(2);
+  expect(movieRequests[1].searchParams.get('title')).toBe('Arrival');
+  expect(movieRequests[1].searchParams.get('yearMin')).toBe('2000');
+  expect(movieRequests[1].searchParams.get('yearMax')).toBe('2025');
+
+  await page.getByRole('combobox', { name: 'Sort films' }).selectOption('imdbRating');
+  await expect.poll(() => movieRequests.length).toBe(3);
+  expect(movieRequests[2].searchParams.get('sort')).toBe('imdbRating');
+  await page.getByRole('combobox', { name: 'Sort direction' }).selectOption('asc');
+  await expect.poll(() => movieRequests.length).toBe(4);
+  expect(movieRequests[3].searchParams.get('order')).toBe('asc');
+});
+
+test('shows a movie service error and recovers when the user retries', async ({ page }) => {
+  let listRequests = 0;
+  await page.route('**/api/movies*', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/movies') {
+      await route.fallback();
+      return;
+    }
+    listRequests += 1;
+    if (listRequests === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Unavailable' }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [
+          {
+            _id: 'recovered-movie',
+            title: 'Recovered Movie',
+            year: 2024,
+            genres: ['Drama'],
+            imdb: { rating: 7.5 },
+          },
+        ],
+        pagination: {
+          page: 1,
+          limit: 30,
+          total: 1,
+          pages: 1,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      }),
+    });
+  });
+  await page.goto('/');
+
+  await expect(page.locator('.empty-state strong')).toHaveText('Could not load films');
+  await expect(page.getByText('Request failed (503).')).toBeVisible();
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByRole('heading', { name: 'Recovered Movie' })).toBeVisible();
+  await expect(page.locator('.result-count')).toHaveText('1 FILMS');
 });
 
 test('registers, signs in, and signs out', async ({ page }) => {

@@ -135,7 +135,9 @@
             {{ session.user.name.charAt(0).toUpperCase() }}
           } @else {
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M15 8V5.5A2.5 2.5 0 0 0 12.5 3h-7A2.5 2.5 0 0 0 3 5.5v13A2.5 2.5 0 0 0 5.5 21h7a2.5 2.5 0 0 0 2.5-2.5V16m-4-4h10m0 0-4-4m4 4-4 4" />
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <path d="m10 17 5-5-5-5" />
+              <path d="M15 12H3" />
             </svg>
           }
         </button>
@@ -342,7 +344,7 @@
             <h2>
               @if (showWatchlist()) {
                 Your watchlist
-              } @else if (search()) {
+              } @else if (search() || hasAdvancedFilters()) {
                 Search results
               } @else if (activeGenres().length > 0) {
                 {{ activeGenres().join(' + ') }}, for you
@@ -354,7 +356,14 @@
           <div class="catalog-controls">
             <span class="result-count">{{ pagination().total }} FILMS</span>
             <div class="catalog-control-actions" role="group" aria-label="Catalog search and sort">
-              <button class="advanced-search-toggle" type="button" disabled>
+              <button
+                class="advanced-search-toggle"
+                [class.is-open]="advancedSearchOpen()"
+                aria-controls="advanced-search-panel"
+                [attr.aria-expanded]="advancedSearchOpen()"
+                type="button"
+                (click)="advancedSearchOpen.update((open) => !open)"
+              >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M4 7h16M7 12h10m-7 5h4" />
                   <circle cx="8" cy="7" r="2" />
@@ -366,22 +375,32 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3" />
                 </svg>
-                <select class="sort-select" aria-label="Sort films" disabled>
-                  <option value="year">Newest year</option>
-                  <option value="imdbRating">Top rated</option>
-                  <option value="title">Title</option>
-                  <option value="runtime">Runtime</option>
-                  <option value="released">Release date</option>
-                  <option value="metacritic">Metacritic score</option>
+                <select
+                  class="sort-select"
+                  aria-label="Sort films"
+                  [value]="selectedSort()"
+                  (change)="updateMovieSort($event)"
+                >
+                  @for (option of movieSortOptions; track option.value) {
+                    <option [value]="option.value">{{ option.label }}</option>
+                  }
                 </select>
               </label>
               <label class="sort-control">
-                <select class="sort-select" aria-label="Sort direction" disabled>
+                <select
+                  class="sort-select"
+                  aria-label="Sort direction"
+                  [value]="selectedSortOrder()"
+                  (change)="updateSortOrder($event)"
+                >
                   <option value="desc">Highest / newest first</option>
                   <option value="asc">Lowest / oldest first</option>
                 </select>
               </label>
             </div>
+            @if (hasAdvancedFilters()) {
+              <span class="advanced-search-active">Advanced filters applied</span>
+            }
           </div>
         </div>
 
@@ -398,6 +417,197 @@
             </button>
           }
         </div>
+        @if (advancedSearchOpen()) {
+          <form
+            class="advanced-search-panel"
+            id="advanced-search-panel"
+            (submit)="submitAdvancedSearch($event)"
+          >
+            <div class="advanced-search-heading">
+              <div>
+                <strong>Find a film by its details</strong>
+                <span>Filters are matched against the complete movie collection.</span>
+              </div>
+              <button
+                class="advanced-search-clear"
+                type="button"
+                (click)="clearAdvancedSearch()"
+              >
+                Clear filters
+              </button>
+            </div>
+            <div class="advanced-search-fields">
+              <label class="advanced-search-field">
+                Title
+                <input
+                  maxlength="150"
+                  placeholder="Film title"
+                  [value]="advancedSearchDraft().title"
+                  (input)="onAdvancedSearchInput('title', $event)"
+                />
+              </label>
+              <label class="advanced-search-field">
+                Plot
+                <input
+                  maxlength="200"
+                  placeholder="Story or subject"
+                  [value]="advancedSearchDraft().plot"
+                  (input)="onAdvancedSearchInput('plot', $event)"
+                />
+              </label>
+              <label class="advanced-search-field">
+                Director
+                <input
+                  maxlength="100"
+                  placeholder="Director name"
+                  [value]="advancedSearchDraft().directors"
+                  (input)="onAdvancedSearchInput('directors', $event)"
+                />
+              </label>
+              <label class="advanced-search-field">
+                Cast member
+                <input
+                  maxlength="100"
+                  placeholder="Actor name"
+                  [value]="advancedSearchDraft().cast"
+                  (input)="onAdvancedSearchInput('cast', $event)"
+                />
+              </label>
+              <label class="advanced-search-field">
+                Content rating
+                <input
+                  maxlength="20"
+                  placeholder="e.g. PG-13"
+                  [value]="advancedSearchDraft().rated"
+                  (input)="onAdvancedSearchInput('rated', $event)"
+                />
+              </label>
+              <label class="advanced-search-field">
+                Movie type
+                <input
+                  maxlength="30"
+                  placeholder="e.g. movie"
+                  [value]="advancedSearchDraft().type"
+                  (input)="onAdvancedSearchInput('type', $event)"
+                />
+              </label>
+              <fieldset class="advanced-search-range">
+                <legend>Release year</legend>
+                <label>
+                  From
+                  <input
+                    aria-label="Release year from"
+                    inputmode="numeric"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().yearMin"
+                    (input)="onAdvancedSearchInput('yearMin', $event)"
+                  />
+                </label>
+                <label>
+                  To
+                  <input
+                    aria-label="Release year to"
+                    inputmode="numeric"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().yearMax"
+                    (input)="onAdvancedSearchInput('yearMax', $event)"
+                  />
+                </label>
+              </fieldset>
+              <fieldset class="advanced-search-range">
+                <legend>Runtime (minutes)</legend>
+                <label>
+                  Min
+                  <input
+                    aria-label="Minimum runtime"
+                    inputmode="numeric"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().runtimeMin"
+                    (input)="onAdvancedSearchInput('runtimeMin', $event)"
+                  />
+                </label>
+                <label>
+                  Max
+                  <input
+                    aria-label="Maximum runtime"
+                    inputmode="numeric"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().runtimeMax"
+                    (input)="onAdvancedSearchInput('runtimeMax', $event)"
+                  />
+                </label>
+              </fieldset>
+              <fieldset class="advanced-search-range">
+                <legend>IMDb rating (0-10)</legend>
+                <label>
+                  Min
+                  <input
+                    aria-label="Minimum IMDb rating"
+                    max="10"
+                    min="0"
+                    step="0.1"
+                    type="number"
+                    [value]="advancedSearchDraft().imdbRatingMin"
+                    (input)="onAdvancedSearchInput('imdbRatingMin', $event)"
+                  />
+                </label>
+                <label>
+                  Max
+                  <input
+                    aria-label="Maximum IMDb rating"
+                    max="10"
+                    min="0"
+                    step="0.1"
+                    type="number"
+                    [value]="advancedSearchDraft().imdbRatingMax"
+                    (input)="onAdvancedSearchInput('imdbRatingMax', $event)"
+                  />
+                </label>
+              </fieldset>
+              <fieldset class="advanced-search-range">
+                <legend>Metacritic score (0-100)</legend>
+                <label>
+                  Min
+                  <input
+                    aria-label="Minimum Metacritic score"
+                    max="100"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().metacriticMin"
+                    (input)="onAdvancedSearchInput('metacriticMin', $event)"
+                  />
+                </label>
+                <label>
+                  Max
+                  <input
+                    aria-label="Maximum Metacritic score"
+                    max="100"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().metacriticMax"
+                    (input)="onAdvancedSearchInput('metacriticMax', $event)"
+                  />
+                </label>
+              </fieldset>
+            </div>
+            @if (advancedSearchError()) {
+              <p class="advanced-search-error" role="alert">{{ advancedSearchError() }}</p>
+            }
+            <div class="advanced-search-actions">
+              <button class="advanced-search-submit" type="submit">Apply filters</button>
+            </div>
+          </form>
+        }
         @if (genresError()) {
           <p class="genre-error" role="alert">{{ genresError() }}</p>
         }

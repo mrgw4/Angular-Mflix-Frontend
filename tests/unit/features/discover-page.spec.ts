@@ -76,16 +76,20 @@ function flushMoviesRequest(
   genres: string[] = [],
   page = 1,
   search: string | null = null,
+  sort = 'year',
+  order = 'desc',
+  queryParams: Record<string, string> = {},
 ): void {
   const request = httpTesting.expectOne(
     (candidate) =>
       candidate.url === '/api/movies' &&
       candidate.params.get('page') === String(page) &&
       candidate.params.get('limit') === '30' &&
-      candidate.params.get('sort') === 'year' &&
-      candidate.params.get('order') === 'desc' &&
+      candidate.params.get('sort') === sort &&
+      candidate.params.get('order') === order &&
       candidate.params.get('genres') === (genres.length > 0 ? genres.join(',') : null) &&
-      candidate.params.get('search') === search,
+      candidate.params.get('search') === search &&
+      Object.entries(queryParams).every(([key, value]) => candidate.params.get(key) === value),
   );
   if (!Array.isArray(response)) {
     const payload = response as Record<string, unknown>;
@@ -407,13 +411,132 @@ describe('DiscoverPage', () => {
     ).not.toContain('Top rated');
     expect(
       fixture.nativeElement.querySelector('.advanced-search-toggle')?.disabled,
-    ).toBeTrue();
+    ).toBeFalse();
     expect(
       fixture.nativeElement.querySelector('[aria-label="Sort films"]')?.disabled,
-    ).toBeTrue();
+    ).toBeFalse();
     expect(
       fixture.nativeElement.querySelector('[aria-label="Sort direction"]')?.disabled,
-    ).toBeTrue();
+    ).toBeFalse();
+  });
+
+  it('applies advanced text and numeric filters to backend requests and clears them', () => {
+    (
+      fixture.nativeElement.querySelector('.advanced-search-toggle') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+
+    const sortFilms = fixture.nativeElement.querySelector(
+      '[aria-label="Sort films"]',
+    ) as HTMLSelectElement;
+    sortFilms.value = 'imdbRating';
+    sortFilms.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse, [], 1, null, 'imdbRating');
+    fixture.detectChanges();
+
+    const sortDirection = fixture.nativeElement.querySelector(
+      '[aria-label="Sort direction"]',
+    ) as HTMLSelectElement;
+    sortDirection.value = 'asc';
+    sortDirection.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse, [], 1, null, 'imdbRating', 'asc');
+    fixture.detectChanges();
+
+    setInputValue(
+      fixture.nativeElement.querySelector('[placeholder="Film title"]') as HTMLInputElement,
+      '  Arrival  ',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Release year from"]') as HTMLInputElement,
+      '2000',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Maximum runtime"]') as HTMLInputElement,
+      '150',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Minimum IMDb rating"]') as HTMLInputElement,
+      '7.5',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Minimum Metacritic score"]') as HTMLInputElement,
+      '50',
+    );
+    fixture.detectChanges();
+    (
+      fixture.nativeElement.querySelector('.advanced-search-submit') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+
+    flushMoviesRequest(
+      httpTesting,
+      {
+        data: [movieResponse.data[2]],
+        pagination: {
+          page: 1,
+          limit: 30,
+          total: 1,
+          pages: 1,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      },
+      [],
+      1,
+      null,
+      'imdbRating',
+      'asc',
+      {
+        title: 'Arrival',
+        yearMin: '2000',
+        runtimeMax: '150',
+        imdbRatingMin: '7.5',
+        metacriticMin: '50',
+      },
+    );
+    fixture.detectChanges();
+
+    expect(movieTitles(fixture)).toEqual(['Arrival']);
+    expect(fixture.nativeElement.textContent).toContain('Advanced filters applied');
+    expect(fixture.nativeElement.querySelector('.result-count')?.textContent?.trim()).toBe(
+      '1 FILMS',
+    );
+
+    (
+      fixture.nativeElement.querySelector('.advanced-search-clear') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse, [], 1, null, 'imdbRating', 'asc');
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['The Quiet Between', 'Moonlight', 'Arrival']);
+    expect(fixture.nativeElement.textContent).not.toContain('Advanced filters applied');
+  });
+
+  it('validates advanced numeric ranges before sending a request', () => {
+    (
+      fixture.nativeElement.querySelector('.advanced-search-toggle') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Release year from"]') as HTMLInputElement,
+      '2025',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Release year to"]') as HTMLInputElement,
+      '2000',
+    );
+    fixture.detectChanges();
+    (
+      fixture.nativeElement.querySelector('.advanced-search-submit') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.advanced-search-error')?.textContent).toContain(
+      'Minimum year must be no greater than maximum year.',
+    );
+    httpTesting.expectNone((request) => request.url === '/api/movies');
   });
 
   it('uses backend pagination metadata to navigate pages and show the total film count', () => {
@@ -505,6 +628,57 @@ describe('DiscoverPage', () => {
     expect(fixture.nativeElement.querySelector('.pagination-controls')).toBeNull();
   });
 
+  it('reports malformed pagination metadata instead of rendering invalid page controls', () => {
+    (
+      Array.from(
+        fixture.nativeElement.querySelectorAll('.genre-pill') as NodeListOf<HTMLButtonElement>,
+      ).find((button) => button.textContent?.trim() === 'All films') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+
+    httpTesting.expectOne((request) => request.url === '/api/movies').flush({
+      data: movieResponse.data,
+      pagination: {
+        ...movieResponse.pagination,
+        pages: '334',
+      },
+    });
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'The server returned invalid movie pagination data.',
+    );
+    expect(fixture.nativeElement.querySelector('.pagination-controls')).toBeNull();
+  });
+
+  it('shows an error when the backend returns an invalid genre list', () => {
+    fixture.destroy();
+    fixture = TestBed.createComponent(DiscoverPage);
+    fixture.detectChanges();
+    httpTesting.expectOne('/api/movies/genres').flush({ genres: ['Drama', 42] });
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'The server returned an invalid genres response.',
+    );
+  });
+
+  it('shows the request status when loading genres fails', () => {
+    fixture.destroy();
+    fixture = TestBed.createComponent(DiscoverPage);
+    fixture.detectChanges();
+    httpTesting
+      .expectOne('/api/movies/genres')
+      .flush({ error: 'Unavailable' }, { status: 503, statusText: 'Service Unavailable' });
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load genres: Request failed (503).',
+    );
+  });
+
   it('persists saved films and filters the catalog to the watchlist', () => {
     const saveButton = fixture.nativeElement.querySelector(
       'button[aria-label="Add Moonlight to watchlist"]',
@@ -586,6 +760,47 @@ describe('DiscoverPage', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).not.toContain('Comments are closed.');
     expect(fixture.nativeElement.textContent).toContain('A thoughtful comment.');
+  });
+
+  it('ignores invalid comment events and guards against duplicate or unauthenticated actions', () => {
+    fixture.componentInstance['onCommentNameInput'](new Event('input'));
+    fixture.componentInstance['onAuthInput'](new Event('input'), 'email');
+    fixture.componentInstance['submitLogout']();
+    fixture.componentInstance['submitComment'](new SubmitEvent('submit'));
+    httpTesting.expectNone('/api/comments');
+    httpTesting.expectNone('/api/users/logout');
+
+    (
+      fixture.nativeElement.querySelector(
+        'button[aria-label="View The Quiet Between"]',
+      ) as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    httpTesting.expectOne('/api/comments?movieId=movie-123').flush([]);
+    fixture.detectChanges();
+    const form = fixture.nativeElement.querySelector('.comment-form') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    httpTesting.expectNone('/api/comments');
+
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Your name"]') as HTMLInputElement,
+      'Morgan',
+    );
+    fixture.detectChanges();
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    httpTesting.expectNone('/api/comments');
+
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Your comment"]') as HTMLTextAreaElement,
+      'A comment that should be submitted once.',
+    );
+    fixture.detectChanges();
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    const post = httpTesting.expectOne('/api/comments');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    httpTesting.expectNone('/api/comments');
+    post.flush({ comment: { _id: 'comment-once', name: 'Morgan', text: 'Submitted once.' } });
+    fixture.detectChanges();
   });
 
   it('rejects mismatched registration passwords and reports login errors', () => {
@@ -821,9 +1036,11 @@ describe('DiscoverPage', () => {
     ).click();
     fixture.detectChanges();
     (fixture.nativeElement.querySelector('.account-action') as HTMLButtonElement).click();
-    httpTesting
-      .expectOne('/api/users/logout')
-      .flush({ error: 'Logout unavailable' }, { status: 503, statusText: 'Unavailable' });
+    fixture.componentInstance['submitLogout']();
+    httpTesting.expectOne('/api/users/logout').flush(
+      { error: 'Logout unavailable' },
+      { status: 503, statusText: 'Unavailable' },
+    );
     fixture.detectChanges();
 
     expect(window.localStorage.getItem('mosaic.auth.v1')).toBeNull();

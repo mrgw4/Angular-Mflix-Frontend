@@ -46,8 +46,69 @@ interface MoviePage {
   pagination: MoviePagination;
 }
 
+type AdvancedSearchField =
+  | 'title'
+  | 'plot'
+  | 'directors'
+  | 'cast'
+  | 'rated'
+  | 'type'
+  | 'yearMin'
+  | 'yearMax'
+  | 'runtimeMin'
+  | 'runtimeMax'
+  | 'imdbRatingMin'
+  | 'imdbRatingMax'
+  | 'metacriticMin'
+  | 'metacriticMax';
+
+type AdvancedSearchDraft = Record<AdvancedSearchField, string>;
+
+interface AdvancedSearchFilters {
+  title?: string;
+  plot?: string;
+  directors?: string;
+  cast?: string;
+  rated?: string;
+  type?: string;
+  yearMin?: number;
+  yearMax?: number;
+  runtimeMin?: number;
+  runtimeMax?: number;
+  imdbRatingMin?: number;
+  imdbRatingMax?: number;
+  metacriticMin?: number;
+  metacriticMax?: number;
+  sort?: 'title' | 'year' | 'runtime' | 'released' | 'metacritic' | 'imdbRating';
+  order?: 'asc' | 'desc';
+}
+
 const allFilmsGenre = 'All films';
 const moviesPerPage = 30;
+const emptyAdvancedSearch: AdvancedSearchDraft = {
+  title: '',
+  plot: '',
+  directors: '',
+  cast: '',
+  rated: '',
+  type: '',
+  yearMin: '',
+  yearMax: '',
+  runtimeMin: '',
+  runtimeMax: '',
+  imdbRatingMin: '',
+  imdbRatingMax: '',
+  metacriticMin: '',
+  metacriticMax: '',
+};
+const movieSortOptions = [
+  { value: 'year', label: 'Newest year' },
+  { value: 'imdbRating', label: 'Top rated' },
+  { value: 'title', label: 'Title' },
+  { value: 'runtime', label: 'Runtime' },
+  { value: 'released', label: 'Release date' },
+  { value: 'metacritic', label: 'Metacritic score' },
+] as const;
 const emptyPagination: MoviePagination = {
   page: 1,
   limit: moviesPerPage,
@@ -256,6 +317,7 @@ export class DiscoverPage {
   private searchTimeout?: number;
 
   protected readonly genres = signal<string[]>([]);
+  protected readonly movieSortOptions = movieSortOptions;
   protected readonly visibleGenres = computed(() => {
     const searchTerm = this.genreSearch().trim().toLocaleLowerCase();
     return this.genres().filter((genre) => genre.toLocaleLowerCase().includes(searchTerm));
@@ -271,6 +333,19 @@ export class DiscoverPage {
   protected readonly genresError = signal('');
   protected readonly activeGenres = signal<string[]>([]);
   protected readonly sortByRating = signal(false);
+  protected readonly advancedSearchOpen = signal(false);
+  protected readonly advancedSearchDraft = signal(emptyAdvancedSearch);
+  protected readonly advancedFilters = signal<AdvancedSearchFilters>({});
+  protected readonly advancedSearchError = signal('');
+  protected readonly hasAdvancedFilters = computed(() =>
+    Object.keys(this.advancedFilters()).some((key) => key !== 'sort' && key !== 'order'),
+  );
+  protected readonly selectedSort = computed(
+    () => this.advancedFilters().sort ?? (this.sortByRating() ? 'imdbRating' : 'year'),
+  );
+  protected readonly selectedSortOrder = computed(
+    () => this.advancedFilters().order ?? 'desc',
+  );
   protected readonly showWatchlist = signal(false);
   protected readonly selectedMovie = signal<Movie | null>(null);
   protected readonly comments = signal<MovieComment[]>([]);
@@ -365,10 +440,11 @@ export class DiscoverPage {
         params: {
           page: String(page),
           limit: String(moviesPerPage),
-          sort: this.sortByRating() ? 'imdbRating' : 'year',
-          order: 'desc',
+          sort: this.selectedSort(),
+          order: this.selectedSortOrder(),
           ...(this.search().trim() ? { search: this.search().trim() } : {}),
           ...(selectedGenres.length > 0 ? { genres: selectedGenres.join(',') } : {}),
+          ...this.advancedQueryParams(),
         },
       })
       .pipe(
@@ -420,6 +496,147 @@ export class DiscoverPage {
 
   protected toggleSort(): void {
     this.sortByRating.update((enabled) => !enabled);
+  }
+
+  private advancedQueryParams(): Record<string, string> {
+    const filters = this.advancedFilters();
+    const params: Record<string, string> = {};
+    for (const field of ['title', 'plot', 'directors', 'cast', 'rated', 'type'] as const) {
+      const value = filters[field]?.trim();
+      if (value) {
+        params[field] = value;
+      }
+    }
+    for (const field of [
+      'yearMin',
+      'yearMax',
+      'runtimeMin',
+      'runtimeMax',
+      'imdbRatingMin',
+      'imdbRatingMax',
+      'metacriticMin',
+      'metacriticMax',
+    ] as const) {
+      const value = filters[field];
+      if (value !== undefined) {
+        params[field] = String(value);
+      }
+    }
+    return params;
+  }
+
+  protected updateAdvancedSearchField(field: AdvancedSearchField, value: string): void {
+    this.advancedSearchDraft.update((draft) => ({ ...draft, [field]: value }));
+    this.advancedSearchError.set('');
+  }
+
+  protected onAdvancedSearchInput(field: AdvancedSearchField, event: Event): void {
+    if (event.target instanceof HTMLInputElement) {
+      this.updateAdvancedSearchField(field, event.target.value);
+    }
+  }
+
+  protected submitAdvancedSearch(event: Event): void {
+    event.preventDefault();
+    const draft = this.advancedSearchDraft();
+    const ranges = [
+      ['yearMin', 'yearMax', 'Minimum year must be no greater than maximum year.'],
+      ['runtimeMin', 'runtimeMax', 'Minimum runtime must be no greater than maximum runtime.'],
+      [
+        'imdbRatingMin',
+        'imdbRatingMax',
+        'Minimum IMDb rating must be no greater than maximum rating.',
+      ],
+      [
+        'metacriticMin',
+        'metacriticMax',
+        'Minimum Metacritic score must be no greater than maximum score.',
+      ],
+    ] as const;
+    for (const [minimumField, maximumField, message] of ranges) {
+      const minimum = draft[minimumField];
+      const maximum = draft[maximumField];
+      if (minimum && maximum && Number(minimum) > Number(maximum)) {
+        this.advancedSearchError.set(message);
+        return;
+      }
+    }
+
+    const filters: AdvancedSearchFilters = {
+      sort: this.selectedSort(),
+      order: this.selectedSortOrder(),
+    };
+    for (const field of ['title', 'plot', 'directors', 'cast', 'rated', 'type'] as const) {
+      const value = draft[field].trim();
+      if (value) {
+        filters[field] = value;
+      }
+    }
+    for (const field of [
+      'yearMin',
+      'yearMax',
+      'runtimeMin',
+      'runtimeMax',
+      'imdbRatingMin',
+      'imdbRatingMax',
+      'metacriticMin',
+      'metacriticMax',
+    ] as const) {
+      const value = draft[field];
+      if (value !== '') {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+          this.advancedSearchError.set('Enter valid numbers for the range filters.');
+          return;
+        }
+        filters[field] = numericValue;
+      }
+    }
+
+    this.advancedSearchError.set('');
+    this.advancedFilters.set(filters);
+    this.currentPage.set(1);
+    this.loadMovies();
+  }
+
+  protected clearAdvancedSearch(): void {
+    this.advancedSearchDraft.set({ ...emptyAdvancedSearch });
+    this.advancedSearchError.set('');
+    this.advancedFilters.update((filters) => ({
+      sort: filters.sort,
+      order: filters.order,
+    }));
+    this.currentPage.set(1);
+    this.loadMovies();
+  }
+
+  protected updateMovieSort(event: Event): void {
+    if (!(event.target instanceof HTMLSelectElement)) {
+      return;
+    }
+    const value = event.target.value;
+    const option = movieSortOptions.find((sortOption) => sortOption.value === value);
+    if (!option) {
+      return;
+    }
+    const sort = option.value;
+    this.sortByRating.set(sort === 'imdbRating');
+    this.advancedFilters.update((filters) => ({ ...filters, sort }));
+    this.currentPage.set(1);
+    this.loadMovies();
+  }
+
+  protected updateSortOrder(event: Event): void {
+    if (!(event.target instanceof HTMLSelectElement)) {
+      return;
+    }
+    const value = event.target.value;
+    if (value !== 'asc' && value !== 'desc') {
+      return;
+    }
+    this.advancedFilters.update((filters) => ({ ...filters, order: value }));
+    this.currentPage.set(1);
+    this.loadMovies();
   }
 
   protected onGenreSearchInput(event: Event): void {
