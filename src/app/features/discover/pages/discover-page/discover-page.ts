@@ -32,7 +32,30 @@ interface MovieComment {
   date: string;
 }
 
-const genres = ['All films', 'Drama', 'Mystery', 'Comedy', 'Adventure', 'Thriller', 'Romance'];
+interface MoviePagination {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
+interface MoviePage {
+  movies: Movie[];
+  pagination: MoviePagination;
+}
+
+const allFilmsGenre = 'All films';
+const moviesPerPage = 30;
+const emptyPagination: MoviePagination = {
+  page: 1,
+  limit: moviesPerPage,
+  total: 0,
+  pages: 0,
+  hasNextPage: false,
+  hasPrevPage: false,
+};
 const watchlistStorageKey = 'mosaic.watchlist.v1';
 const authStorageKey = 'mosaic.auth.v1';
 
@@ -100,6 +123,61 @@ function unwrapMovies(payload: unknown): unknown[] {
   }
 
   return [];
+}
+
+function normalizeMoviePage(payload: unknown, requestedPage: number): MoviePage {
+  const record = asRecord(payload);
+  const rawPagination = record['pagination'];
+
+  if (rawPagination === undefined) {
+    if (Array.isArray(record['data'])) {
+      throw new Error('The server returned an invalid movie list response.');
+    }
+
+    const movies = unwrapMovies(payload).map(normalizeMovie);
+    const pages = movies.length > 0 ? 1 : 0;
+    return {
+      movies,
+      pagination: {
+        page: requestedPage,
+        limit: moviesPerPage,
+        total: movies.length,
+        pages,
+        hasNextPage: false,
+        hasPrevPage: requestedPage > 1,
+      },
+    };
+  }
+
+  const pagination = asRecord(rawPagination);
+  if (!Array.isArray(record['data'])) {
+    throw new Error('The server returned an invalid movie list response.');
+  }
+
+  const { page, limit, total, pages, hasNextPage, hasPrevPage } = pagination;
+  if (
+    typeof page !== 'number' ||
+    typeof limit !== 'number' ||
+    typeof total !== 'number' ||
+    typeof pages !== 'number' ||
+    !Number.isInteger(page) ||
+    !Number.isInteger(limit) ||
+    !Number.isInteger(total) ||
+    !Number.isInteger(pages) ||
+    page < 1 ||
+    limit < 1 ||
+    total < 0 ||
+    pages < 0 ||
+    typeof hasNextPage !== 'boolean' ||
+    typeof hasPrevPage !== 'boolean'
+  ) {
+    throw new Error('The server returned invalid movie pagination data.');
+  }
+
+  return {
+    movies: record['data'].map(normalizeMovie),
+    pagination: { page, limit, total, pages, hasNextPage, hasPrevPage },
+  };
 }
 
 function unwrapComments(payload: unknown): unknown[] {
@@ -174,13 +252,24 @@ export class DiscoverPage {
   private readonly destroyRef = inject(DestroyRef);
   private readonly savedMovieIds = signal(readSavedMovieIds());
   private commentsRequest?: Subscription;
+  private moviesRequest?: Subscription;
+  private searchTimeout?: number;
 
-  protected readonly genres = genres;
+  protected readonly genres = signal<string[]>([]);
+  protected readonly visibleGenres = computed(() => {
+    const searchTerm = this.genreSearch().trim().toLocaleLowerCase();
+    return this.genres().filter((genre) => genre.toLocaleLowerCase().includes(searchTerm));
+  });
+  protected readonly genreOptions = computed(() => [allFilmsGenre, ...this.genres()]);
   protected readonly movies = signal<Movie[]>([]);
+  protected readonly pagination = signal(emptyPagination);
+  protected readonly currentPage = signal(1);
   protected readonly isLoading = signal(true);
   protected readonly loadError = signal('');
   protected readonly search = signal('');
-  protected readonly activeGenre = signal('All films');
+  protected readonly genreSearch = signal('');
+  protected readonly genresError = signal('');
+  protected readonly activeGenres = signal<string[]>([]);
   protected readonly sortByRating = signal(false);
   protected readonly showWatchlist = signal(false);
   protected readonly selectedMovie = signal<Movie | null>(null);
@@ -204,29 +293,18 @@ export class DiscoverPage {
   protected readonly savedCount = computed(() => this.savedMovieIds().length);
   protected readonly featuredMovie = computed(() => this.movies()[0] ?? null);
   protected readonly filteredMovies = computed(() => {
-    const term = this.search().trim().toLowerCase();
-    const genre = this.activeGenre();
     const watchlist = this.showWatchlist();
     const savedIds = this.savedMovieIds();
-    const sortByRating = this.sortByRating();
 
-    return this.movies()
-      .filter((movie) => {
-        const matchesSearch =
-          !term ||
-          [movie.title, movie.director, ...movie.genres].some((value) =>
-            value.toLowerCase().includes(term),
-          );
-        const matchesGenre = genre === 'All films' || movie.genres.includes(genre);
-        const matchesWatchlist = !watchlist || savedIds.includes(movie.id);
-        return matchesSearch && matchesGenre && matchesWatchlist;
-      })
-      .sort((first, second) =>
-        sortByRating ? second.rating - first.rating : second.year - first.year,
-      );
+    return this.movies().filter((movie) => !watchlist || savedIds.includes(movie.id));
   });
 
   constructor() {
+    this.destroyRef.onDestroy(() => {
+      if (this.searchTimeout !== undefined) {
+        window.clearTimeout(this.searchTimeout);
+      }
+    });
     effect(() => {
       try {
         window.localStorage.setItem(watchlistStorageKey, JSON.stringify(this.savedMovieIds()));
@@ -234,27 +312,83 @@ export class DiscoverPage {
         return;
       }
     });
+    this.loadGenres();
     this.loadMovies();
   }
 
+  private loadGenres(): void {
+    this.http
+      .get<unknown>('/api/movies/genres')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (payload) => {
+          const values = asRecord(payload)['genres'];
+          if (
+            !Array.isArray(values) ||
+            !values.every((genre: unknown): genre is string => typeof genre === 'string')
+          ) {
+            this.genresError.set('The server returned an invalid genres response.');
+            return;
+          }
+
+          this.genres.set(
+            [...new Set(values.map((genre: string) => genre.trim()).filter(Boolean))].sort(
+              (first, second) => first.localeCompare(second),
+            ),
+          );
+          this.genresError.set('');
+        },
+        error: (error: unknown) => {
+          this.genresError.set(
+            error instanceof HttpErrorResponse
+              ? `Could not load genres: Request failed (${error.status}).`
+              : 'Could not load genres.',
+          );
+        },
+      });
+  }
+
   protected loadMovies(): void {
+    if (this.searchTimeout !== undefined) {
+      window.clearTimeout(this.searchTimeout);
+      this.searchTimeout = undefined;
+    }
+    this.moviesRequest?.unsubscribe();
     this.isLoading.set(true);
     this.loadError.set('');
+    this.movies.set([]);
 
-    this.http
-      .get<unknown>('/api/movies', { params: { limit: '30' } })
+    const selectedGenres = this.activeGenres();
+    const page = this.currentPage();
+    this.moviesRequest = this.http
+      .get<unknown>('/api/movies', {
+        params: {
+          page: String(page),
+          limit: String(moviesPerPage),
+          sort: this.sortByRating() ? 'imdbRating' : 'year',
+          order: 'desc',
+          ...(this.search().trim() ? { search: this.search().trim() } : {}),
+          ...(selectedGenres.length > 0 ? { genres: selectedGenres.join(',') } : {}),
+        },
+      })
       .pipe(
-        map((payload) => unwrapMovies(payload).map(normalizeMovie)),
+        map((payload) => normalizeMoviePage(payload, page)),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
-        next: (movies) => this.movies.set(movies),
+        next: (result) => {
+          this.movies.set(result.movies);
+          this.pagination.set(result.pagination);
+          this.currentPage.set(result.pagination.page);
+        },
         error: (error: unknown) => {
           this.isLoading.set(false);
           this.loadError.set(
             error instanceof HttpErrorResponse
               ? `Request failed (${error.status}).`
-              : 'Could not load films.',
+              : error instanceof Error
+                ? error.message
+                : 'Could not load films.',
           );
         },
         complete: () => this.isLoading.set(false),
@@ -263,6 +397,14 @@ export class DiscoverPage {
 
   protected setSearch(value: string): void {
     this.search.set(value);
+    if (this.searchTimeout !== undefined) {
+      window.clearTimeout(this.searchTimeout);
+    }
+    this.searchTimeout = window.setTimeout(() => {
+      this.searchTimeout = undefined;
+      this.currentPage.set(1);
+      this.loadMovies();
+    }, 300);
   }
 
   protected onSearchInput(event: Event): void {
@@ -280,14 +422,45 @@ export class DiscoverPage {
     this.sortByRating.update((enabled) => !enabled);
   }
 
-  protected chooseGenre(genre: string): void {
-    this.activeGenre.set(genre);
-    this.showWatchlist.set(false);
+  protected onGenreSearchInput(event: Event): void {
+    if (event.target instanceof HTMLInputElement) {
+      this.genreSearch.set(event.target.value);
+    }
   }
 
   protected toggleGenre(genre: string): void {
-    this.activeGenre.set(this.activeGenre() === genre ? 'All films' : genre);
+    if (genre === allFilmsGenre) {
+      this.activeGenres.set([]);
+    } else {
+      this.activeGenres.update((selected) =>
+        selected.includes(genre)
+          ? selected.filter((selectedGenre) => selectedGenre !== genre)
+          : [...selected, genre],
+      );
+    }
     this.showWatchlist.set(false);
+    this.currentPage.set(1);
+    this.loadMovies();
+  }
+
+  protected goToPage(page: number): void {
+    const pagination = this.pagination();
+    if (this.isLoading() || page < 1 || page > pagination.pages) {
+      return;
+    }
+    if (this.searchTimeout !== undefined) {
+      window.clearTimeout(this.searchTimeout);
+      this.searchTimeout = undefined;
+      page = 1;
+    }
+    this.currentPage.set(page);
+    this.loadMovies();
+  }
+
+  protected isGenreSelected(genre: string): boolean {
+    return genre === allFilmsGenre
+      ? this.activeGenres().length === 0
+      : this.activeGenres().includes(genre);
   }
 
   protected toggleWatchlist(): void {

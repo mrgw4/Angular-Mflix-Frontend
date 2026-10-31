@@ -43,28 +43,39 @@
           <circle cx="10.8" cy="10.8" r="6.3" />
           <path d="m16 16 4.3 4.3" />
         </svg>
-        <input aria-label="Search genres" type="search" placeholder="Search genres" disabled />
+        <input
+          aria-label="Search genres"
+          type="search"
+          placeholder="Search genres"
+          [value]="genreSearch()"
+          (input)="onGenreSearchInput($event)"
+        />
       </label>
       <nav class="genre-nav" aria-label="Browse by genre">
         <button
           class="genre-link"
-          [class.selected]="activeGenre() === 'All films'"
+          [class.selected]="isGenreSelected('All films')"
+          [attr.aria-pressed]="isGenreSelected('All films')"
           type="button"
-          (click)="chooseGenre('All films')"
+          (click)="toggleGenre('All films')"
         >
           <span class="genre-dot" aria-hidden="true"></span>
           All films
         </button>
-        @for (genre of genres.slice(1); track genre) {
+        @for (genre of visibleGenres(); track genre) {
           <button
             class="genre-link"
-            [class.selected]="activeGenre() === genre"
+            [class.selected]="isGenreSelected(genre)"
+            [attr.aria-pressed]="isGenreSelected(genre)"
             type="button"
             (click)="toggleGenre(genre)"
           >
             <span [class]="'genre-dot dot-' + genre.toLowerCase()" aria-hidden="true"></span>
             {{ genre }}
           </button>
+        }
+        @if (visibleGenres().length === 0) {
+          <span class="genre-no-results">No matching genres</span>
         }
       </nav>
     </section>
@@ -319,7 +330,7 @@
             </button>
           </div>
           <span class="feature-index"
-            >01 <i></i> {{ movies().length.toString().padStart(2, '0') }}</span
+            >01 <i></i> {{ pagination().total.toString().padStart(2, '0') }}</span
           >
         </section>
       }
@@ -333,15 +344,15 @@
                 Your watchlist
               } @else if (search()) {
                 Search results
-              } @else if (activeGenre() === 'All films') {
-                A little of everything
+              } @else if (activeGenres().length > 0) {
+                {{ activeGenres().join(' + ') }}, for you
               } @else {
-                {{ activeGenre() }}, for you
+                A little of everything
               }
             </h2>
           </div>
           <div class="catalog-controls">
-            <span class="result-count">{{ filteredMovies().length }} FILMS</span>
+            <span class="result-count">{{ pagination().total }} FILMS</span>
             <div class="catalog-control-actions" role="group" aria-label="Catalog search and sort">
               <button class="advanced-search-toggle" type="button" disabled>
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -375,18 +386,21 @@
         </div>
 
         <div class="genre-pills" aria-label="Filter movies by genre">
-          @for (genre of genres; track genre) {
+          @for (genre of genreOptions(); track genre) {
             <button
               class="genre-pill"
-              [class.is-active]="activeGenre() === genre"
-              [attr.aria-pressed]="activeGenre() === genre"
+              [class.is-active]="isGenreSelected(genre)"
+              [attr.aria-pressed]="isGenreSelected(genre)"
               type="button"
-              (click)="chooseGenre(genre)"
+              (click)="toggleGenre(genre)"
             >
               {{ genre }}
             </button>
           }
         </div>
+        @if (genresError()) {
+          <p class="genre-error" role="alert">{{ genresError() }}</p>
+        }
 
         @if (filteredMovies().length > 0) {
           <div class="movie-grid">
@@ -468,11 +482,27 @@
               </article>
             }
           </div>
-          <nav class="pagination-controls" aria-label="Movie pages">
-            <button class="page-button" type="button" disabled>Previous</button>
-            <span>Page 1 of 1</span>
-            <button class="page-button" type="button" disabled>Next</button>
-          </nav>
+          @if (pagination().pages > 1) {
+            <nav class="pagination-controls" aria-label="Movie pages">
+              <button
+                class="page-button"
+                type="button"
+                [disabled]="!pagination().hasPrevPage || isLoading()"
+                (click)="goToPage(pagination().page - 1)"
+              >
+                Previous
+              </button>
+              <span>Page {{ pagination().page }} of {{ pagination().pages }}</span>
+              <button
+                class="page-button"
+                type="button"
+                [disabled]="!pagination().hasNextPage || isLoading()"
+                (click)="goToPage(pagination().page + 1)"
+              >
+                Next
+              </button>
+            </nav>
+          }
         } @else {
           <div class="empty-state">
             <svg viewBox="0 0 24 24" aria-hidden="true">

@@ -39,6 +39,14 @@ const movieResponse = {
       poster_url: 'https://example.test/arrival.jpg',
     },
   ],
+  pagination: {
+    page: 1,
+    limit: 30,
+    total: 10001,
+    pages: 334,
+    hasNextPage: true,
+    hasPrevPage: false,
+  },
 };
 
 function setInputValue(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
@@ -56,6 +64,50 @@ function movieTitles(fixture: ComponentFixture<DiscoverPage>): string[] {
   ).map((button) => button.textContent?.trim() ?? '');
 }
 
+function flushGenresRequest(httpTesting: HttpTestingController): void {
+  httpTesting.expectOne('/api/movies/genres').flush({
+    genres: ['Mystery', 'Drama', 'Sci-Fi', 'Drama'],
+  });
+}
+
+function flushMoviesRequest(
+  httpTesting: HttpTestingController,
+  response: object | unknown[] = movieResponse,
+  genres: string[] = [],
+  page = 1,
+  search: string | null = null,
+): void {
+  const request = httpTesting.expectOne(
+    (candidate) =>
+      candidate.url === '/api/movies' &&
+      candidate.params.get('page') === String(page) &&
+      candidate.params.get('limit') === '30' &&
+      candidate.params.get('sort') === 'year' &&
+      candidate.params.get('order') === 'desc' &&
+      candidate.params.get('genres') === (genres.length > 0 ? genres.join(',') : null) &&
+      candidate.params.get('search') === search,
+  );
+  if (!Array.isArray(response)) {
+    const payload = response as Record<string, unknown>;
+    const data = payload['data'];
+    if (Array.isArray(data) && !('pagination' in payload)) {
+      request.flush({
+        ...payload,
+        pagination: {
+          page,
+          limit: 30,
+          total: data.length,
+          pages: data.length > 0 ? 1 : 0,
+          hasNextPage: false,
+          hasPrevPage: page > 1,
+        },
+      });
+      return;
+    }
+  }
+  request.flush(response);
+}
+
 describe('DiscoverPage', () => {
   let fixture: ComponentFixture<DiscoverPage>;
   let httpTesting: HttpTestingController;
@@ -70,7 +122,8 @@ describe('DiscoverPage', () => {
     httpTesting = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(DiscoverPage);
     fixture.detectChanges();
-    httpTesting.expectOne('/api/movies?limit=30').flush(movieResponse);
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
     fixture.detectChanges();
   });
 
@@ -223,52 +276,135 @@ describe('DiscoverPage', () => {
     expect(window.localStorage.getItem('mosaic.auth.v1')).toBeNull();
   });
 
-  it('searches by title and director, filters by genre, and shows the new catalog controls', () => {
+  it('searches movies, filters by multiple backend genres, and searches available genres', () => {
     expect(movieTitles(fixture)).toEqual(['The Quiet Between', 'Moonlight', 'Arrival']);
 
-    setInputValue(
-      fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
-      '  barry jenkins  ',
-    );
-    fixture.detectChanges();
-    expect(movieTitles(fixture)).toEqual(['Moonlight']);
+    jasmine.clock().install();
+    try {
+      setInputValue(
+        fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
+        '  barry jenkins  ',
+      );
+      fixture.detectChanges();
+      jasmine.clock().tick(300);
+      fixture.detectChanges();
+      flushMoviesRequest(
+        httpTesting,
+        {
+          data: [movieResponse.data[1]],
+          pagination: {
+            page: 1,
+            limit: 30,
+            total: 1,
+            pages: 1,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        },
+        [],
+        1,
+        'barry jenkins',
+      );
+      fixture.detectChanges();
+      expect(movieTitles(fixture)).toEqual(['Moonlight']);
 
-    setInputValue(
-      fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
-      '',
-    );
-    fixture.detectChanges();
-    (
+      setInputValue(
+        fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
+        '',
+      );
+      fixture.detectChanges();
+      jasmine.clock().tick(300);
+      fixture.detectChanges();
+      flushMoviesRequest(httpTesting, movieResponse);
+      fixture.detectChanges();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+
+    const genrePill = (name: string): HTMLButtonElement =>
       Array.from(
         fixture.nativeElement.querySelectorAll('.genre-pill') as NodeListOf<HTMLButtonElement>,
-      ).find((button) => button.textContent?.trim() === 'Drama') as HTMLButtonElement
-    ).click();
+      ).find((button) => button.textContent?.trim() === name) as HTMLButtonElement;
+
+    genrePill('Drama').click();
+    fixture.detectChanges();
+    flushMoviesRequest(
+      httpTesting,
+      {
+        data: movieResponse.data.filter((movie) => movie.genres.includes('Drama')),
+      },
+      ['Drama'],
+    );
     fixture.detectChanges();
     expect(movieTitles(fixture)).toEqual(['The Quiet Between', 'Moonlight']);
 
-    (
-      Array.from(
-        fixture.nativeElement.querySelectorAll('.genre-pill') as NodeListOf<HTMLButtonElement>,
-      ).find((button) => button.textContent?.trim() === 'All films') as HTMLButtonElement
-    ).click();
+    genrePill('Mystery').click();
     fixture.detectChanges();
+    flushMoviesRequest(
+      httpTesting,
+      {
+        data: [
+          {
+            _id: 'backend-only',
+            title: 'Backend-only mystery',
+            year: 2024,
+            genres: ['Drama', 'Mystery'],
+            imdb: { rating: 8.2 },
+          },
+        ],
+      },
+      ['Drama', 'Mystery'],
+    );
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['Backend-only mystery']);
+    expect(genrePill('Drama').getAttribute('aria-pressed')).toBe('true');
+    expect(genrePill('Mystery').getAttribute('aria-pressed')).toBe('true');
+
+    genrePill('All films').click();
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['The Quiet Between', 'Moonlight', 'Arrival']);
+
+    genrePill('Sci-Fi').click();
+    fixture.detectChanges();
+    flushMoviesRequest(
+      httpTesting,
+      {
+        data: [
+          {
+            _id: 'backend-only-sci-fi',
+            title: 'Backend-only science fiction',
+            year: 2023,
+            genres: ['Sci-Fi'],
+            imdb: { rating: 7.8 },
+          },
+        ],
+      },
+      ['Sci-Fi'],
+    );
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['Backend-only science fiction']);
+
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Search genres"]') as HTMLInputElement,
+      'sci',
+    );
+    fixture.detectChanges();
+    const sidebarGenres = Array.from(
+      fixture.nativeElement.querySelectorAll('.genre-nav .genre-link') as NodeListOf<HTMLButtonElement>,
+    ).map((button) => button.textContent?.trim());
+    expect(sidebarGenres).toEqual(['All films', 'Sci-Fi']);
+    expect(genrePill('Sci-Fi')).toBeTruthy();
 
     const mysteryGenre = Array.from(
       fixture.nativeElement.querySelectorAll('.genre-link') as NodeListOf<HTMLButtonElement>,
     ).find((button) => button.textContent?.trim() === 'Mystery') as HTMLButtonElement;
-    mysteryGenre.click();
-    fixture.detectChanges();
-    expect(movieTitles(fixture)).toEqual(['The Quiet Between']);
-    mysteryGenre.click();
-    fixture.detectChanges();
-    expect(movieTitles(fixture).length).toBe(3);
+    expect(mysteryGenre).toBeUndefined();
 
     expect(
       fixture.nativeElement.querySelector('.side-nav')?.textContent,
     ).not.toContain('Top rated');
-    expect(
-      fixture.nativeElement.querySelector('[aria-label="Search genres"]')?.disabled,
-    ).toBeTrue();
     expect(
       fixture.nativeElement.querySelector('.advanced-search-toggle')?.disabled,
     ).toBeTrue();
@@ -278,9 +414,95 @@ describe('DiscoverPage', () => {
     expect(
       fixture.nativeElement.querySelector('[aria-label="Sort direction"]')?.disabled,
     ).toBeTrue();
+  });
+
+  it('uses backend pagination metadata to navigate pages and show the total film count', () => {
+    expect(fixture.nativeElement.querySelector('.result-count')?.textContent?.trim()).toBe(
+      '10001 FILMS',
+    );
+    expect(fixture.nativeElement.querySelector('.pagination-controls')?.textContent).toContain(
+      'Page 1 of 334',
+    );
+    const previous = fixture.nativeElement.querySelector(
+      '.pagination-controls .page-button',
+    ) as HTMLButtonElement;
+    const next = fixture.nativeElement.querySelectorAll(
+      '.pagination-controls .page-button',
+    )[1] as HTMLButtonElement;
+    expect(previous.disabled).toBeTrue();
+    expect(next.disabled).toBeFalse();
+
+    next.click();
+    fixture.detectChanges();
+    flushMoviesRequest(
+      httpTesting,
+      {
+        data: [
+          {
+            _id: 'page-two-movie',
+            title: 'A Film on Page Two',
+            year: 2024,
+            genres: ['Drama'],
+            imdb: { rating: 8.1 },
+          },
+        ],
+        pagination: {
+          page: 2,
+          limit: 30,
+          total: 10001,
+          pages: 334,
+          hasNextPage: true,
+          hasPrevPage: true,
+        },
+      },
+      [],
+      2,
+    );
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['A Film on Page Two']);
+    expect(fixture.nativeElement.querySelector('.pagination-controls')?.textContent).toContain(
+      'Page 2 of 334',
+    );
     expect(
-      fixture.nativeElement.querySelectorAll('.pagination-controls .page-button:disabled').length,
-    ).toBe(2);
+      (fixture.nativeElement.querySelector('.pagination-controls .page-button') as HTMLButtonElement)
+        .disabled,
+    ).toBeFalse();
+    expect(
+      (fixture.nativeElement.querySelectorAll(
+        '.pagination-controls .page-button',
+      )[1] as HTMLButtonElement).disabled,
+    ).toBeFalse();
+
+    (
+      fixture.nativeElement.querySelector(
+        '.pagination-controls .page-button',
+      ) as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pagination-controls')?.textContent).toContain(
+      'Page 1 of 334',
+    );
+  });
+
+  it('reports a movie response that is missing pagination metadata', () => {
+    (
+      Array.from(
+        fixture.nativeElement.querySelectorAll('.genre-pill') as NodeListOf<HTMLButtonElement>,
+      ).find((button) => button.textContent?.trim() === 'All films') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+
+    httpTesting.expectOne((request) => request.url === '/api/movies').flush({
+      data: movieResponse.data,
+    });
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'The server returned an invalid movie list response.',
+    );
+    expect(fixture.nativeElement.querySelector('.pagination-controls')).toBeNull();
   });
 
   it('persists saved films and filters the catalog to the watchlist', () => {
@@ -437,7 +659,8 @@ describe('DiscoverPage', () => {
     fixture.destroy();
     fixture = TestBed.createComponent(DiscoverPage);
     fixture.detectChanges();
-    httpTesting.expectOne('/api/movies?limit=30').flush(movieResponse);
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
     fixture.detectChanges();
 
     expect(movieTitles(fixture).length).toBe(3);
@@ -461,7 +684,8 @@ describe('DiscoverPage', () => {
     fixture.destroy();
     fixture = TestBed.createComponent(DiscoverPage);
     fixture.detectChanges();
-    httpTesting.expectOne('/api/movies?limit=30').flush(movieResponse);
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Jane Doe');
     expect(fixture.nativeElement.textContent).toContain('jane@example.com');
@@ -473,7 +697,8 @@ describe('DiscoverPage', () => {
     window.localStorage.setItem('mosaic.auth.v1', JSON.stringify({ token: 'missing-user' }));
     fixture = TestBed.createComponent(DiscoverPage);
     fixture.detectChanges();
-    httpTesting.expectOne('/api/movies?limit=30').flush(movieResponse);
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Movie lover');
   });
@@ -482,7 +707,8 @@ describe('DiscoverPage', () => {
     fixture.destroy();
     fixture = TestBed.createComponent(DiscoverPage);
     fixture.detectChanges();
-    httpTesting.expectOne('/api/movies?limit=30').flush([
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting, [
       null,
       {
         id: 'legacy',
@@ -503,7 +729,8 @@ describe('DiscoverPage', () => {
     fixture.destroy();
     fixture = TestBed.createComponent(DiscoverPage);
     fixture.detectChanges();
-    httpTesting.expectOne('/api/movies?limit=30').flush({});
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting, {});
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('No films found');
   });
@@ -512,15 +739,20 @@ describe('DiscoverPage', () => {
     fixture.destroy();
     fixture = TestBed.createComponent(DiscoverPage);
     fixture.detectChanges();
-    httpTesting
-      .expectOne('/api/movies?limit=30')
-      .flush({ error: 'Unavailable' }, { status: 503, statusText: 'Service Unavailable' });
+    flushGenresRequest(httpTesting);
+    const failedRequest = httpTesting.expectOne(
+      (candidate) => candidate.url === '/api/movies' && candidate.params.get('genres') === null,
+    );
+    failedRequest.flush(
+      { error: 'Unavailable' },
+      { status: 503, statusText: 'Service Unavailable' },
+    );
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Request failed (503).');
 
     (fixture.nativeElement.querySelector('.empty-state .sort-button') as HTMLButtonElement).click();
     fixture.detectChanges();
-    httpTesting.expectOne('/api/movies?limit=30').flush({ movies: [] });
+    flushMoviesRequest(httpTesting, { movies: [] });
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('No films found');
   });
