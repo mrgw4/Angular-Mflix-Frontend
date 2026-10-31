@@ -312,6 +312,7 @@ export class DiscoverPage {
   private readonly elementRef = inject(ElementRef<HTMLElement>);
   private readonly destroyRef = inject(DestroyRef);
   private readonly savedMovieIds = signal(readSavedMovieIds());
+  private readonly failedPosterUrls = signal(new Set<string>());
   private commentsRequest?: Subscription;
   private moviesRequest?: Subscription;
   private searchTimeout?: number;
@@ -815,6 +816,20 @@ export class DiscoverPage {
 
   protected isSaved(movieId: string): boolean {
     return this.savedMovieIds().includes(movieId);
+  }
+
+  protected isPosterUnavailable(posterUrl: string): boolean {
+    return this.failedPosterUrls().has(posterUrl);
+  }
+
+  protected onPosterError(event: Event): void {
+    if (!(event.target instanceof HTMLImageElement)) {
+      return;
+    }
+    const posterUrl = event.target.getAttribute('src');
+    if (posterUrl) {
+      this.failedPosterUrls.update((failedUrls) => new Set(failedUrls).add(posterUrl));
+    }
   }
 
   protected featuredBackground(movie: Movie): string {

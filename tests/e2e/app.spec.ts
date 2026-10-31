@@ -153,6 +153,28 @@ test.beforeEach(async ({ page }) => {
   await mockApi(page);
 });
 
+test('keeps sorting controls compact and genre search icon correctly sized', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Arrival' })).toBeVisible();
+
+  const genreIcon = await page.locator('.genre-search > svg').boundingBox();
+  expect(genreIcon?.width).toBe(14);
+  expect(genreIcon?.height).toBe(14);
+
+  const controlGroup = page.locator('.catalog-control-actions');
+  const controlGroupBox = await controlGroup.boundingBox();
+  const directionBox = await page.getByLabel('Sort direction').boundingBox();
+  expect(controlGroupBox?.height).toBeLessThanOrEqual(40);
+  expect(controlGroupBox?.width).toBeLessThan(500);
+  expect(directionBox?.width).toBeGreaterThan(110);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  const mobileControls = await controlGroup.boundingBox();
+  expect(mobileControls).toBeTruthy();
+  expect(mobileControls!.x + mobileControls!.width).toBeLessThanOrEqual(375);
+  expect(await page.getByLabel('Sort direction').isVisible()).toBe(true);
+});
+
 test('discovers films, filters, saves, and opens movie details', async ({ page }) => {
   await page.goto('/');
 

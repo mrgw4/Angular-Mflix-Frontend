@@ -622,15 +622,20 @@
                   [attr.aria-label]="'View ' + movie.title"
                   (click)="openMovie(movie)"
                 >
-                  @if (movie.posterUrl) {
+                  @if (movie.posterUrl && !isPosterUnavailable(movie.posterUrl)) {
                     <img
                       class="poster-image"
                       [src]="movie.posterUrl"
                       [alt]="movie.title + ' film still'"
                       loading="lazy"
+                      (error)="onPosterError($event)"
                     />
                   } @else {
-                    <span class="poster-placeholder">
+                    <span
+                      class="poster-placeholder"
+                      role="img"
+                      [attr.aria-label]="movie.title + ' poster unavailable'"
+                    >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M4 7.5 14 4v15L4 16V7.5Zm10 2.1 5-2.1v9l-5-1.9M7 8.5v6" />
                       </svg>

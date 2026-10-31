@@ -136,6 +136,21 @@ describe('DiscoverPage', () => {
     window.localStorage.clear();
   });
 
+  it('shows the neutral poster placeholder when an image fails to load', () => {
+    const poster = fixture.nativeElement.querySelector(
+      'img[alt="Moonlight film still"]',
+    ) as HTMLImageElement;
+    poster.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('img[alt="Moonlight film still"]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector(
+        '[role="img"][aria-label="Moonlight poster unavailable"]',
+      ),
+    ).toBeTruthy();
+  });
+
   it('loads and posts comments from the film details dialog', () => {
     const viewButton = fixture.nativeElement.querySelector(
       'button[aria-label="View The Quiet Between"]',

@@ -1723,6 +1723,17 @@ a {
   border-radius: 5px;
 }
 
+.genre-search > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
 .genre-search input {
   width: 100%;
   min-width: 0;
@@ -2287,10 +2298,12 @@ a {
 .catalog-control-actions {
   display: flex;
   align-items: center;
-  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
   background: #fff;
   border: 1px solid #dfe5dd;
   border-radius: 4px;
+  overflow: hidden;
 }
 
 .result-count {
@@ -2301,8 +2314,8 @@ a {
 .sort-button,
 .sort-control {
   display: inline-flex;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: max-content;
   min-height: 36px;
   align-items: center;
   justify-content: center;
@@ -2326,14 +2339,32 @@ a {
   cursor: default;
 }
 
+.sort-control > svg,
+.advanced-search-toggle > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.advanced-search-toggle > svg {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+}
+
 .sort-control.is-active {
   color: #38644a;
   border-color: #b9d2bd;
 }
 
 .sort-select {
-  width: 100%;
-  min-width: 0;
+  width: auto;
+  min-width: max-content;
   padding: 0;
   color: inherit;
   font: inherit;
@@ -3204,6 +3235,20 @@ a {
 
   .catalog-control-actions {
     width: 100%;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .catalog-control-actions > .advanced-search-toggle {
+    flex: 1 1 100%;
+  }
+
+  .catalog-control-actions > .sort-control {
+    flex: 1 0 auto;
+  }
+
+  .catalog-control-actions .sort-select {
+    min-width: max-content;
   }
 
   .sort-button svg,
