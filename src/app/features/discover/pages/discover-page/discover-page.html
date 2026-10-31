@@ -729,6 +729,12 @@
                 Loading films
               } @else if (loadError()) {
                 Could not load films
+              } @else if (showWatchlist()) {
+                @if (savedCount() > 0) {
+                  No watchlist films match
+                } @else {
+                  Your watchlist is empty
+                }
               } @else {
                 No films found
               }
@@ -738,6 +744,8 @@
                 Connecting to your collection...
               } @else if (loadError()) {
                 {{ loadError() }}
+              } @else if (showWatchlist()) {
+                Try changing or clearing your filters.
               } @else {
                 Try another title or clear the genre filter.
               }

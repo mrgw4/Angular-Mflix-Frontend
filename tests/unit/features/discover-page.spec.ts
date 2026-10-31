@@ -694,14 +694,14 @@ describe('DiscoverPage', () => {
     );
   });
 
-  it('persists saved films and filters the catalog to the watchlist', () => {
+  it('persists saved films and loads them into the watchlist', () => {
     const saveButton = fixture.nativeElement.querySelector(
       'button[aria-label="Add Moonlight to watchlist"]',
     ) as HTMLButtonElement;
     saveButton.click();
     fixture.detectChanges();
 
-    expect(window.localStorage.getItem('mosaic.watchlist.v1')).toBe('["movie-456"]');
+    expect(window.localStorage.getItem('mosaic.watchlist.v1.guest')).toBe('["movie-456"]');
     expect(
       (fixture.nativeElement.querySelector('.nav-count') as HTMLElement).textContent?.trim(),
     ).toBe('1');
@@ -712,6 +712,8 @@ describe('DiscoverPage', () => {
       ).find((button) => button.textContent?.includes('Watchlist')) as HTMLButtonElement
     ).click();
     fixture.detectChanges();
+    httpTesting.expectOne('/api/movies/movie-456').flush(movieResponse.data[1]);
+    fixture.detectChanges();
     expect(movieTitles(fixture)).toEqual(['Moonlight']);
     (
       fixture.nativeElement.querySelector(
@@ -719,7 +721,225 @@ describe('DiscoverPage', () => {
       ) as HTMLButtonElement
     ).click();
     fixture.detectChanges();
-    expect(window.localStorage.getItem('mosaic.watchlist.v1')).toBe('[]');
+    expect(window.localStorage.getItem('mosaic.watchlist.v1.guest')).toBe('[]');
+  });
+
+  it('searches all saved movies locally without leaving watchlist mode', async () => {
+    window.localStorage.setItem(
+      'mosaic.watchlist.v1.guest',
+      JSON.stringify(['movie-456', 'movie-789']),
+    );
+    fixture.destroy();
+    fixture = TestBed.createComponent(DiscoverPage);
+    fixture.detectChanges();
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+
+    (
+      fixture.nativeElement.querySelector('.side-nav button') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    httpTesting.expectOne('/api/movies/movie-456').flush(movieResponse.data[1]);
+    httpTesting.expectOne('/api/movies/movie-789').flush(movieResponse.data[2]);
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['Moonlight', 'Arrival']);
+
+    setInputValue(
+      fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
+      'Villeneuve',
+    );
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    fixture.detectChanges();
+
+    expect(movieTitles(fixture)).toEqual(['Arrival']);
+    expect(
+      fixture.nativeElement.querySelector('.catalog-heading h2')?.textContent,
+    ).toContain('Your watchlist');
+  });
+
+  it('applies search, genre, advanced filters, and sorting to saved films', () => {
+    const savedMovies = [
+      {
+        _id: 'quiet',
+        title: 'Quiet Story',
+        year: 2020,
+        genres: ['Drama'],
+        imdb: { rating: 8 },
+        runtime: 100,
+        fullplot: 'A quiet tale.',
+        plot: 'A family story.',
+        directors: ['Mara Ellison'],
+        cast: ['Nina Park'],
+        rated: 'PG',
+        type: 'movie',
+        metacritic: 80,
+        released: '2020-01-01',
+      },
+      {
+        _id: 'other',
+        title: 'Other Worlds',
+        year: 2010,
+        genres: ['Sci-Fi'],
+        imdb: { rating: 7 },
+        runtime: 90,
+        plot: 'A space journey.',
+        director: 'Alex Smith',
+        cast: ['Sam Lee'],
+        rated: 'PG-13',
+        type: 'series',
+        metacritic: null,
+        released: '2010-01-01',
+      },
+    ];
+    window.localStorage.setItem(
+      'mosaic.watchlist.v1.guest',
+      JSON.stringify(['quiet', 'other']),
+    );
+    fixture.destroy();
+    fixture = TestBed.createComponent(DiscoverPage);
+    fixture.detectChanges();
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+    fixture.componentInstance['showWatchlist'].set(true);
+    fixture.componentInstance['loadMovies']();
+    httpTesting.expectOne('/api/movies/quiet').flush(savedMovies[0]);
+    httpTesting.expectOne('/api/movies/other').flush(savedMovies[1]);
+    fixture.detectChanges();
+
+    const applyFilters = (filters: Record<string, string | number> = {}): string[] => {
+      fixture.componentInstance['advancedFilters'].set(filters);
+      fixture.componentInstance['search'].set('');
+      fixture.componentInstance['activeGenres'].set([]);
+      fixture.componentInstance['loadMovies']();
+      fixture.detectChanges();
+      return movieTitles(fixture);
+    };
+
+    fixture.componentInstance['search'].set('Mara Ellison');
+    fixture.componentInstance['loadMovies']();
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['Quiet Story']);
+    fixture.componentInstance['search'].set('not in the watchlist');
+    fixture.componentInstance['loadMovies']();
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual([]);
+    fixture.componentInstance['search'].set('');
+
+    fixture.componentInstance['activeGenres'].set(['Sci-Fi']);
+    fixture.componentInstance['loadMovies']();
+    fixture.detectChanges();
+    expect(movieTitles(fixture)).toEqual(['Other Worlds']);
+
+    expect(applyFilters({ title: 'quiet' })).toEqual(['Quiet Story']);
+    expect(applyFilters({ title: 'missing' })).toEqual([]);
+    expect(applyFilters({ plot: 'family story' })).toEqual(['Quiet Story']);
+    expect(applyFilters({ plot: 'missing' })).toEqual([]);
+    expect(applyFilters({ directors: 'Mara Ellison' })).toEqual(['Quiet Story']);
+    expect(applyFilters({ directors: 'Missing Director' })).toEqual([]);
+    expect(applyFilters({ cast: 'Nina Park' })).toEqual(['Quiet Story']);
+    expect(applyFilters({ cast: 'Missing Actor' })).toEqual([]);
+    expect(applyFilters({ rated: 'PG' })).toEqual(['Quiet Story']);
+    expect(applyFilters({ rated: 'R' })).toEqual([]);
+    expect(applyFilters({ type: 'movie' })).toEqual(['Quiet Story']);
+    expect(applyFilters({ type: 'documentary' })).toEqual([]);
+    expect(applyFilters({ yearMin: 2010, yearMax: 2020 })).toEqual([
+      'Quiet Story',
+      'Other Worlds',
+    ]);
+    expect(applyFilters({ runtimeMin: 95 })).toEqual(['Quiet Story']);
+    expect(applyFilters({ runtimeMax: 95 })).toEqual(['Other Worlds']);
+    expect(applyFilters({ imdbRatingMin: 8 })).toEqual(['Quiet Story']);
+    expect(applyFilters({ imdbRatingMax: 7 })).toEqual(['Other Worlds']);
+    expect(applyFilters({ metacriticMin: 1 })).toEqual(['Quiet Story']);
+
+    for (const sort of [
+      'title',
+      'year',
+      'runtime',
+      'released',
+      'metacritic',
+      'imdbRating',
+    ] as const) {
+      expect(applyFilters({ sort, order: 'asc' }).length).toBe(2);
+      expect(applyFilters({ sort, order: 'desc' }).length).toBe(2);
+    }
+    fixture.componentInstance['sortByRating'].set(true);
+    expect(applyFilters().length).toBe(2);
+  });
+
+  it('shows an empty state for an empty watchlist', () => {
+    (
+      fixture.nativeElement.querySelector('.side-nav button') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Your watchlist is empty');
+    expect(fixture.nativeElement.textContent).toContain('Try changing or clearing your filters.');
+    httpTesting.expectNone((request) => request.url.startsWith('/api/movies/'));
+  });
+
+  it('switches between guest and user-specific watchlists on login and logout', () => {
+    window.localStorage.setItem('mosaic.watchlist.v1.guest', JSON.stringify(['movie-456']));
+    window.localStorage.setItem(
+      'mosaic.watchlist.v1.user.user-1',
+      JSON.stringify(['movie-123', 'movie-789']),
+    );
+    fixture.destroy();
+    fixture = TestBed.createComponent(DiscoverPage);
+    fixture.detectChanges();
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement.querySelector('.nav-count') as HTMLElement).textContent?.trim(),
+    ).toBe('1');
+
+    (
+      fixture.nativeElement.querySelector(
+        'button[aria-label="Open login menu"]',
+      ) as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="email"]') as HTMLInputElement,
+      'jane@example.com',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="current-password"]') as HTMLInputElement,
+      'correct-password',
+    );
+    submit(fixture.nativeElement.querySelector('.account-form') as HTMLFormElement);
+    httpTesting.expectOne('/api/users/login').flush({
+      token: 'test-token',
+      user: { id: 'user-1', name: 'Jane Doe', email: 'jane@example.com' },
+    });
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement.querySelector('.nav-count') as HTMLElement).textContent?.trim(),
+    ).toBe('2');
+    expect(window.localStorage.getItem('mosaic.watchlist.v1.user.user-1')).toBe(
+      '["movie-123","movie-789"]',
+    );
+
+    (
+      fixture.nativeElement.querySelector(
+        'button[aria-label="Account menu for Jane Doe"]',
+      ) as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    (
+      Array.from(
+        fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>,
+      ).find((button) => button.textContent?.includes('Log out')) as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    httpTesting.expectOne('/api/users/logout').flush({});
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement.querySelector('.nav-count') as HTMLElement).textContent?.trim(),
+    ).toBe('1');
   });
 
   it('displays comment loading errors and allows the dialog to be closed by its backdrop', () => {
@@ -884,6 +1104,7 @@ describe('DiscoverPage', () => {
 
   it('restores valid saved movies and ignores invalid saved account data', () => {
     window.localStorage.setItem('mosaic.watchlist.v1', JSON.stringify(['movie-456', 3]));
+    window.localStorage.removeItem('mosaic.watchlist.v1.guest');
     window.localStorage.setItem('mosaic.auth.v1', '{invalid json');
 
     fixture.destroy();
@@ -898,7 +1119,7 @@ describe('DiscoverPage', () => {
       (fixture.nativeElement.querySelector('.nav-count') as HTMLElement).textContent?.trim(),
     ).toBe('1');
     expect(fixture.nativeElement.textContent).toContain('Movie lover');
-    expect(window.localStorage.getItem('mosaic.watchlist.v1')).toBe('["movie-456"]');
+    expect(window.localStorage.getItem('mosaic.watchlist.v1.guest')).toBe('["movie-456"]');
   });
 
   it('restores valid saved account sessions and rejects incomplete sessions', () => {

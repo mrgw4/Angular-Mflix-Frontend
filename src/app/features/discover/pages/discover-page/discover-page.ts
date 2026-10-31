@@ -9,7 +9,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { map, type Subscription } from 'rxjs';
+import { forkJoin, map, of, type Subscription } from 'rxjs';
 import { AuthApi, type AuthSession } from '../../../../core/auth-api';
 
 interface Movie {
@@ -20,8 +20,14 @@ interface Movie {
   rating: number;
   runtime: number;
   plot: string;
+  plotForFiltering: string;
   director: string;
+  directors: string[];
   cast: string[];
+  rated: string;
+  type: string;
+  metacritic: number | null;
+  released: string;
   posterUrl: string;
 }
 
@@ -120,6 +126,12 @@ const emptyPagination: MoviePagination = {
 const watchlistStorageKey = 'mosaic.watchlist.v1';
 const authStorageKey = 'mosaic.auth.v1';
 
+function getWatchlistStorageKey(userId: string | null): string {
+  return userId
+    ? `${watchlistStorageKey}.user.${encodeURIComponent(userId)}`
+    : `${watchlistStorageKey}.guest`;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
@@ -144,6 +156,8 @@ function asStringArray(value: unknown): string[] {
 function normalizeMovie(value: unknown, index: number): Movie {
   const movie = asRecord(value);
   const imdb = asRecord(movie['imdb']);
+  const directors = asStringArray(movie['directors'] ?? movie['director']);
+  const metacritic = Number(movie['metacritic']);
 
   return {
     id: asString(movie['_id'] ?? movie['id'], `movie-${index}`),
@@ -153,8 +167,17 @@ function normalizeMovie(value: unknown, index: number): Movie {
     rating: Number(imdb['rating'] ?? movie['rating'] ?? movie['vote_average']) || 0,
     runtime: Number(movie['runtime']) || 0,
     plot: asString(movie['fullplot'] ?? movie['plot'] ?? movie['overview']),
-    director: asString(movie['director'] ?? asStringArray(movie['directors'])[0]),
+    plotForFiltering: asString(movie['plot']),
+    director: asString(movie['director'] ?? directors[0]),
+    directors,
     cast: asStringArray(movie['cast'] ?? movie['actors']),
+    rated: asString(movie['rated']),
+    type: asString(movie['type']),
+    metacritic:
+      Number.isFinite(metacritic) && movie['metacritic'] !== null && movie['metacritic'] !== undefined
+        ? metacritic
+        : null,
+    released: asString(movie['released']),
     posterUrl: asString(
       movie['posterUrl'] ?? movie['poster_url'] ?? movie['poster'] ?? movie['image'],
     ),
@@ -256,9 +279,11 @@ function unwrapComments(payload: unknown): unknown[] {
   return [];
 }
 
-function readSavedMovieIds(): string[] {
+function readSavedMovieIds(userId: string | null): string[] {
   try {
-    const stored = window.localStorage.getItem(watchlistStorageKey);
+    const stored =
+      window.localStorage.getItem(getWatchlistStorageKey(userId)) ??
+      (userId === null ? window.localStorage.getItem(watchlistStorageKey) : null);
     if (!stored) {
       return [];
     }
@@ -298,6 +323,102 @@ function readSavedAuthSession(): AuthSession | null {
   }
 }
 
+function matchesText(value: string, filter: string): boolean {
+  return value.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase());
+}
+
+function filterWatchlistMovies(
+  movies: Movie[],
+  search: string,
+  genres: string[],
+  filters: AdvancedSearchFilters,
+): Movie[] {
+  const searchTerm = search.trim();
+  return movies.filter((movie) => {
+    const searchableFields = [movie.title, ...movie.directors, ...movie.genres];
+    if (searchTerm && !searchableFields.some((value) => matchesText(value, searchTerm))) {
+      return false;
+    }
+    if (!genres.every((genre) => movie.genres.includes(genre))) {
+      return false;
+    }
+    if (filters.title && !matchesText(movie.title, filters.title)) {
+      return false;
+    }
+    if (filters.plot && !matchesText(movie.plotForFiltering, filters.plot)) {
+      return false;
+    }
+    if (filters.directors && !movie.directors.includes(filters.directors)) {
+      return false;
+    }
+    if (filters.cast && !movie.cast.includes(filters.cast)) {
+      return false;
+    }
+    if (filters.rated && movie.rated !== filters.rated) {
+      return false;
+    }
+    if (filters.type && movie.type !== filters.type) {
+      return false;
+    }
+
+    const rangeFilters = [
+      [movie.year, filters.yearMin, filters.yearMax],
+      [movie.runtime, filters.runtimeMin, filters.runtimeMax],
+      [movie.rating, filters.imdbRatingMin, filters.imdbRatingMax],
+      [movie.metacritic, filters.metacriticMin, filters.metacriticMax],
+    ] as const;
+    return rangeFilters.every(([value, minimum, maximum]) => {
+      if (minimum === undefined && maximum === undefined) {
+        return true;
+      }
+      return (
+        value !== null &&
+        (minimum === undefined || value >= minimum) &&
+        (maximum === undefined || value <= maximum)
+      );
+    });
+  });
+}
+
+function getMovieSortValue(
+  movie: Movie,
+  sort: NonNullable<AdvancedSearchFilters['sort']>,
+): number | string {
+  switch (sort) {
+    case 'title':
+      return movie.title.toLocaleLowerCase();
+    case 'runtime':
+      return movie.runtime;
+    case 'metacritic':
+      return movie.metacritic ?? -1;
+    case 'released':
+      return Date.parse(movie.released) || movie.year;
+    case 'imdbRating':
+      return movie.rating;
+    case 'year':
+    default:
+      return movie.year;
+  }
+}
+
+function sortWatchlistMovies(
+  movies: Movie[],
+  filters: AdvancedSearchFilters,
+  sortByRating: boolean,
+): Movie[] {
+  const sort = filters.sort ?? (sortByRating ? 'imdbRating' : 'year');
+  const direction = filters.sort ? filters.order ?? 'desc' : 'desc';
+  return [...movies].sort((first, second) => {
+    const firstValue = getMovieSortValue(first, sort);
+    const secondValue = getMovieSortValue(second, sort);
+    const comparison =
+      typeof firstValue === 'string' && typeof secondValue === 'string'
+        ? firstValue.localeCompare(secondValue)
+        : Number(firstValue) - Number(secondValue);
+    return direction === 'asc' ? comparison : -comparison;
+  });
+}
+
 @Component({
   host: {
     '(document:keydown.escape)': 'closeOverlays()',
@@ -311,7 +432,11 @@ export class DiscoverPage {
   private readonly authApi = inject(AuthApi);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly savedMovieIds = signal(readSavedMovieIds());
+  protected readonly authSession = signal<AuthSession | null>(readSavedAuthSession());
+  private readonly savedMovieIds = signal(
+    readSavedMovieIds(this.authSession()?.user.id ?? null),
+  );
+  private readonly watchlistMovieCache = new Map<string, Movie>();
   private readonly failedPosterUrls = signal(new Set<string>());
   private commentsRequest?: Subscription;
   private moviesRequest?: Subscription;
@@ -358,7 +483,6 @@ export class DiscoverPage {
   protected readonly commentLoadError = signal('');
   protected readonly accountMenuOpen = signal(false);
   protected readonly authView = signal<'login' | 'register'>('login');
-  protected readonly authSession = signal<AuthSession | null>(readSavedAuthSession());
   protected readonly authEmail = signal('');
   protected readonly authUsername = signal('');
   protected readonly authPassword = signal('');
@@ -369,10 +493,7 @@ export class DiscoverPage {
   protected readonly savedCount = computed(() => this.savedMovieIds().length);
   protected readonly featuredMovie = computed(() => this.movies()[0] ?? null);
   protected readonly filteredMovies = computed(() => {
-    const watchlist = this.showWatchlist();
-    const savedIds = this.savedMovieIds();
-
-    return this.movies().filter((movie) => !watchlist || savedIds.includes(movie.id));
+    return this.movies();
   });
 
   constructor() {
@@ -383,7 +504,11 @@ export class DiscoverPage {
     });
     effect(() => {
       try {
-        window.localStorage.setItem(watchlistStorageKey, JSON.stringify(this.savedMovieIds()));
+        const userId = this.authSession()?.user.id ?? null;
+        window.localStorage.setItem(
+          getWatchlistStorageKey(userId),
+          JSON.stringify(this.savedMovieIds()),
+        );
       } catch {
         return;
       }
@@ -434,6 +559,11 @@ export class DiscoverPage {
     this.loadError.set('');
     this.movies.set([]);
 
+    if (this.showWatchlist()) {
+      this.loadWatchlist();
+      return;
+    }
+
     const selectedGenres = this.activeGenres();
     const page = this.currentPage();
     this.moviesRequest = this.http
@@ -458,6 +588,67 @@ export class DiscoverPage {
           this.pagination.set(result.pagination);
           this.currentPage.set(result.pagination.page);
         },
+        error: (error: unknown) => {
+          this.isLoading.set(false);
+          this.loadError.set(
+            error instanceof HttpErrorResponse
+              ? `Request failed (${error.status}).`
+              : error instanceof Error
+                ? error.message
+                : 'Could not load films.',
+          );
+        },
+        complete: () => this.isLoading.set(false),
+      });
+  }
+
+  private loadWatchlist(): void {
+    const savedIds = this.savedMovieIds();
+    const missingIds = savedIds.filter((id) => !this.watchlistMovieCache.has(id));
+    const requests = missingIds.map((id) =>
+      this.http
+        .get<unknown>(`/api/movies/${encodeURIComponent(id)}`)
+        .pipe(map((payload) => [id, normalizeMovie(payload, 0)] as const)),
+    );
+    const loadedMovies$ =
+      requests.length > 0
+        ? forkJoin(requests)
+        : of([] as readonly (readonly [string, Movie])[]);
+
+    this.moviesRequest = loadedMovies$
+      .pipe(
+        map((loadedMovies) => {
+          loadedMovies.forEach(([id, movie]) => this.watchlistMovieCache.set(id, movie));
+          const movies = savedIds
+            .map((id) => this.watchlistMovieCache.get(id))
+            .filter((movie): movie is Movie => movie !== undefined);
+          const filteredMovies = sortWatchlistMovies(
+            filterWatchlistMovies(
+              movies,
+              this.search(),
+              this.activeGenres(),
+              this.advancedFilters(),
+            ),
+            this.advancedFilters(),
+            this.sortByRating(),
+          );
+          const pages = Math.ceil(filteredMovies.length / moviesPerPage);
+          const page = Math.min(this.currentPage(), Math.max(pages, 1));
+          this.currentPage.set(page);
+          this.pagination.set({
+            page,
+            limit: moviesPerPage,
+            total: filteredMovies.length,
+            pages,
+            hasNextPage: page < pages,
+            hasPrevPage: page > 1,
+          });
+          return filteredMovies.slice((page - 1) * moviesPerPage, page * moviesPerPage);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (movies) => this.movies.set(movies),
         error: (error: unknown) => {
           this.isLoading.set(false);
           this.loadError.set(
@@ -656,7 +847,6 @@ export class DiscoverPage {
           : [...selected, genre],
       );
     }
-    this.showWatchlist.set(false);
     this.currentPage.set(1);
     this.loadMovies();
   }
@@ -683,12 +873,18 @@ export class DiscoverPage {
 
   protected toggleWatchlist(): void {
     this.showWatchlist.update((visible) => !visible);
+    this.currentPage.set(1);
+    this.loadMovies();
   }
 
   protected toggleSaved(movieId: string): void {
     this.savedMovieIds.update((savedIds) =>
       savedIds.includes(movieId) ? savedIds.filter((id) => id !== movieId) : [...savedIds, movieId],
     );
+    if (this.showWatchlist()) {
+      this.currentPage.set(1);
+      this.loadMovies();
+    }
   }
 
   protected openMovie(movie: Movie): void {
@@ -896,7 +1092,12 @@ export class DiscoverPage {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (session) => {
+          this.savedMovieIds.set(readSavedMovieIds(session.user.id));
           this.authSession.set(session);
+          if (this.showWatchlist()) {
+            this.currentPage.set(1);
+            this.loadMovies();
+          }
           this.authPassword.set('');
           this.confirmPassword.set('');
           this.accountMenuOpen.set(false);
@@ -972,7 +1173,12 @@ export class DiscoverPage {
   }
 
   private finishLogout(message: string): void {
+    this.savedMovieIds.set(readSavedMovieIds(null));
     this.authSession.set(null);
+    if (this.showWatchlist()) {
+      this.currentPage.set(1);
+      this.loadMovies();
+    }
     try {
       window.localStorage.removeItem(authStorageKey);
     } catch {

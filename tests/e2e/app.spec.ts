@@ -1,8 +1,27 @@
 import { expect, test, type Page } from '@playwright/test';
 
 async function mockApi(page: Page): Promise<void> {
-  await page.route('**/api/movies*', (route) => {
-    const params = new URL(route.request().url()).searchParams;
+  await page.route('**/api/movies**', (route) => {
+    const requestUrl = new URL(route.request().url());
+    const params = requestUrl.searchParams;
+    if (requestUrl.pathname === '/api/movies/moonlight') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          _id: 'moonlight',
+          title: 'Moonlight',
+          year: 2016,
+          genres: ['Drama'],
+          imdb: { rating: 7.4 },
+          runtime: 111,
+          plot: 'A young man finds his way through life.',
+          director: 'Barry Jenkins',
+          cast: ['Trevante Rhodes'],
+          posterUrl: '',
+        }),
+      });
+    }
     const selectedGenres = params.get('genres')?.split(',') ?? [];
     const pageNumber = Number(params.get('page') ?? '1');
     const search = params.get('search')?.toLowerCase() ?? '';
@@ -153,6 +172,58 @@ test.beforeEach(async ({ page }) => {
   await mockApi(page);
 });
 
+test('loads and searches saved films in the watchlist', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'mosaic.watchlist.v1.guest',
+      JSON.stringify(['arrival', 'moonlight']),
+    );
+  });
+  await page.route('**/api/movies/*', (route) => {
+    const movieId = new URL(route.request().url()).pathname.split('/').pop();
+    const movie = movieId === 'arrival'
+      ? {
+          _id: 'arrival',
+          title: 'Arrival',
+          year: 2016,
+          genres: ['Drama', 'Sci-Fi'],
+          imdb: { rating: 7.9 },
+          runtime: 116,
+          plot: 'A linguist works to communicate with visitors from another world.',
+          directors: ['Denis Villeneuve'],
+          cast: ['Amy Adams'],
+          posterUrl: '',
+        }
+      : {
+          _id: 'moonlight',
+          title: 'Moonlight',
+          year: 2016,
+          genres: ['Drama'],
+          imdb: { rating: 7.4 },
+          runtime: 111,
+          plot: 'A young man finds his way through life.',
+          director: 'Barry Jenkins',
+          cast: ['Trevante Rhodes'],
+          posterUrl: '',
+        };
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(movie),
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Watchlist 2' }).click();
+
+  await expect(page.getByRole('button', { name: 'View Arrival' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View Moonlight' })).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Search movies' }).fill('Villeneuve');
+
+  await expect(page.getByRole('button', { name: 'View Arrival' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View Moonlight' })).toHaveCount(0);
+  await expect(page.locator('.catalog-heading h2')).toHaveText('Your watchlist');
+});
+
 test('keeps sorting controls compact and genre search icon correctly sized', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Arrival' })).toBeVisible();
@@ -224,6 +295,7 @@ test('discovers films, filters, saves, and opens movie details', async ({ page }
 
   await page.getByRole('searchbox', { name: 'Search movies' }).fill('Moonlight');
   await expect(page.locator('.movie-card')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Moonlight', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add Moonlight to watchlist' }).click();
   await page.getByRole('button', { name: 'Watchlist 1' }).click();
   await expect(page.locator('.movie-card')).toHaveCount(1);
