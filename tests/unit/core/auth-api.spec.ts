@@ -1,7 +1,7 @@
-import { provideHttpClient } from '@angular/common/http';
+import { HttpClient, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, throwError } from 'rxjs';
 import { AuthApi } from '../../../src/app/core/auth-api';
 
 describe('AuthApi', () => {
@@ -44,6 +44,16 @@ describe('AuthApi', () => {
 
     await expectAsync(result).toBeRejectedWithError(
       'The server returned an invalid login response.',
+    );
+  });
+
+  it('normalizes non-Error failures from the HTTP client', async () => {
+    spyOn(TestBed.inject(HttpClient), 'post').and.returnValue(
+      throwError(() => 'unexpected transport failure'),
+    );
+
+    await expectAsync(firstValueFrom(api.login('jane@example.com', 'password'))).toBeRejectedWithError(
+      'The server returned an invalid response.',
     );
   });
 

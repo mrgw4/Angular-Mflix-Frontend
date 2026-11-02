@@ -681,13 +681,10 @@ export class DiscoverPage {
     }
   }
 
-  protected showTopRated(): void {
-    this.sortByRating.set(true);
+  protected showDiscover(): void {
     this.showWatchlist.set(false);
-  }
-
-  protected toggleSort(): void {
-    this.sortByRating.update((enabled) => !enabled);
+    this.currentPage.set(1);
+    this.loadMovies();
   }
 
   private advancedQueryParams(): Record<string, string> {

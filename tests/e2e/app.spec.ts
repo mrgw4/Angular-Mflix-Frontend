@@ -431,3 +431,156 @@ test('registers, signs in, and signs out', async ({ page }) => {
   await page.getByRole('button', { name: 'Log out' }).click();
   await expect(page.getByRole('button', { name: 'Open login menu' })).toBeVisible();
 });
+
+test('isolates guest, first-user, and second-user watchlists across sign-in changes', async ({ page }) => {
+  const accountMovies = [
+    {
+      _id: 'arrival',
+      title: 'Arrival',
+      year: 2016,
+      genres: ['Drama', 'Sci-Fi'],
+      imdb: { rating: 7.9 },
+      runtime: 116,
+      fullplot: 'A linguist works to communicate with visitors from another world.',
+      directors: ['Denis Villeneuve'],
+      cast: ['Amy Adams'],
+      posterUrl: '',
+    },
+    {
+      _id: 'moonlight',
+      title: 'Moonlight',
+      year: 2016,
+      genres: ['Drama'],
+      imdb: { rating: 7.4 },
+      runtime: 111,
+      plot: 'A young man finds his way through life.',
+      director: 'Barry Jenkins',
+      cast: ['Trevante Rhodes'],
+      posterUrl: '',
+    },
+    {
+      _id: 'after-orchard',
+      title: 'After the Orchard',
+      year: 2024,
+      genres: ['Drama'],
+      imdb: { rating: 7.2 },
+      runtime: 102,
+      plot: 'A family returns to their hometown.',
+      director: 'Theo Martin',
+      cast: ['Ari Lane'],
+      posterUrl: '',
+    },
+  ];
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.route('**/api/movies**', (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/movies/genres') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ genres: ['Drama', 'Sci-Fi'] }),
+      });
+    }
+    if (url.pathname === '/api/movies') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: accountMovies,
+          pagination: {
+            page: 1,
+            limit: 30,
+            total: accountMovies.length,
+            pages: 1,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        }),
+      });
+    }
+    const movieId = url.pathname.split('/').pop();
+    const movie = accountMovies.find((entry) => entry._id === movieId);
+    return route.fulfill({
+      status: movie ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(movie ?? { error: 'Movie not found' }),
+    });
+  });
+  await page.route('**/api/users/login', (route) => {
+    const { email } = route.request().postDataJSON() as { email: string };
+    const account = email === 'jane@example.com'
+      ? { id: 'user-1', name: 'Jane Doe', email }
+      : email === 'alex@example.com'
+        ? { id: 'user-2', name: 'Alex Lee', email }
+        : null;
+    return route.fulfill({
+      status: account ? 200 : 401,
+      contentType: 'application/json',
+      body: JSON.stringify(account
+        ? { token: `token-${account.id}`, user: account }
+        : { error: 'Invalid credentials.' }),
+    });
+  });
+
+  async function logIn(email: string, name: string): Promise<void> {
+    if (await page.locator('.account-form').count() === 0) {
+      await page.getByRole('button', { name: 'Open login menu' }).click();
+    }
+    const form = page.locator('.account-form');
+    await form.locator('[autocomplete="email"]').fill(email);
+    await form.locator('[autocomplete="current-password"]').fill('correct-password');
+    await form.getByRole('button', { name: 'Log in' }).click();
+    await expect(page.getByRole('button', { name: `Account menu for ${name}` })).toBeVisible();
+  }
+
+  async function expectOnlySavedMovie(title: string, excludedTitles: string[]): Promise<void> {
+    await expect(page.getByRole('button', { name: `View ${title}` })).toBeVisible();
+    for (const excludedTitle of excludedTitles) {
+      await expect(page.getByRole('button', { name: `View ${excludedTitle}` })).toHaveCount(0);
+    }
+  }
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Add Arrival to watchlist' }).click();
+  await page.getByRole('button', { name: 'Watchlist 1' }).click();
+  await expectOnlySavedMovie('Arrival', ['Moonlight', 'After the Orchard']);
+
+  await logIn('jane@example.com', 'Jane Doe');
+  await expect(page.locator('.empty-state strong')).toHaveText('Your watchlist is empty');
+  await page.getByRole('link', { name: 'Discover' }).click();
+  await page.getByRole('button', { name: 'Add Moonlight to watchlist' }).click();
+  await page.getByRole('button', { name: 'Watchlist 1' }).click();
+  await expectOnlySavedMovie('Moonlight', ['Arrival', 'After the Orchard']);
+
+  await page.getByRole('button', { name: 'Account menu for Jane Doe' }).click();
+  await page.getByRole('button', { name: 'Log out' }).click();
+  await expectOnlySavedMovie('Arrival', ['Moonlight', 'After the Orchard']);
+
+  await logIn('alex@example.com', 'Alex Lee');
+  await expect(page.locator('.empty-state strong')).toHaveText('Your watchlist is empty');
+  await page.getByRole('link', { name: 'Discover' }).click();
+  await page.getByRole('button', { name: 'Add After the Orchard to watchlist' }).click();
+  await page.getByRole('button', { name: 'Watchlist 1' }).click();
+  await expectOnlySavedMovie('After the Orchard', ['Arrival', 'Moonlight']);
+
+  await page.getByRole('button', { name: 'Account menu for Alex Lee' }).click();
+  await page.getByRole('button', { name: 'Log out' }).click();
+  await expectOnlySavedMovie('Arrival', ['Moonlight', 'After the Orchard']);
+
+  await logIn('jane@example.com', 'Jane Doe');
+  await expectOnlySavedMovie('Moonlight', ['Arrival', 'After the Orchard']);
+  await page.getByRole('button', { name: 'Account menu for Jane Doe' }).click();
+  await page.getByRole('button', { name: 'Log out' }).click();
+  await logIn('alex@example.com', 'Alex Lee');
+  await expectOnlySavedMovie('After the Orchard', ['Arrival', 'Moonlight']);
+  const storedWatchlists = await page.evaluate(() => ({
+    guest: JSON.parse(window.localStorage.getItem('mosaic.watchlist.v1.guest') ?? 'null'),
+    firstUser: JSON.parse(window.localStorage.getItem('mosaic.watchlist.v1.user.user-1') ?? 'null'),
+    secondUser: JSON.parse(window.localStorage.getItem('mosaic.watchlist.v1.user.user-2') ?? 'null'),
+  }));
+  expect(storedWatchlists).toEqual({
+    guest: ['arrival'],
+    firstUser: ['moonlight'],
+    secondUser: ['after-orchard'],
+  });
+});

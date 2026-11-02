@@ -1,7 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
+import { HttpClient, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { of, Subject, throwError } from 'rxjs';
 import { DiscoverPage } from '../../../src/app/features/discover/pages/discover-page/discover-page';
+import { AuthApi, type AuthSession } from '../../../src/app/core/auth-api';
 
 const movieResponse = {
   data: [
@@ -151,6 +153,19 @@ describe('DiscoverPage', () => {
     ).toBeTruthy();
   });
 
+  it('uses poster images in featured and detail backgrounds when available', () => {
+    const movies = fixture.componentInstance['movies']();
+    expect(movies[1].posterUrl).toContain('moonlight.jpg');
+    expect(fixture.componentInstance['featuredBackground'](movies[1])).toContain(
+      'url("https://example.test/moonlight.jpg")',
+    );
+    expect(fixture.componentInstance['detailBackground'](movies[1])).toContain(
+      'url("https://example.test/moonlight.jpg")',
+    );
+    expect(fixture.componentInstance['featuredBackground'](movies[0])).not.toContain('url(');
+    expect(fixture.componentInstance['detailBackground'](movies[0])).not.toContain('url(');
+  });
+
   it('loads and posts comments from the film details dialog', () => {
     const viewButton = fixture.nativeElement.querySelector(
       'button[aria-label="View The Quiet Between"]',
@@ -193,6 +208,10 @@ describe('DiscoverPage', () => {
     );
     fixture.detectChanges();
     submit(fixture.nativeElement.querySelector('.comment-form') as HTMLFormElement);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.comment-submit')?.textContent).toContain(
+      'Posting...',
+    );
 
     const post = httpTesting.expectOne('/api/comments');
     expect(post.request.method).toBe('POST');
@@ -264,6 +283,10 @@ describe('DiscoverPage', () => {
     );
     fixture.detectChanges();
     submit(fixture.nativeElement.querySelector('.account-form') as HTMLFormElement);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.account-action')?.textContent).toContain(
+      'Signing in…',
+    );
 
     const login = httpTesting.expectOne('/api/users/login');
     expect(login.request.body).toEqual({
@@ -288,6 +311,9 @@ describe('DiscoverPage', () => {
     ) as HTMLButtonElement;
     logoutButton.click();
     fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.account-action')?.textContent).toContain(
+      'Signing out…',
+    );
     const logout = httpTesting.expectOne('/api/users/logout');
     expect(logout.request.headers.get('Authorization')).toBe('Bearer test-jwt');
     logout.flush({ message: 'Logged out successfully' });
@@ -552,6 +578,54 @@ describe('DiscoverPage', () => {
       'Minimum year must be no greater than maximum year.',
     );
     httpTesting.expectNone((request) => request.url === '/api/movies');
+
+    const component = fixture.componentInstance;
+    const draft = component['advancedSearchDraft']();
+    component['advancedSearchDraft'].set({
+      ...draft,
+      yearMin: '',
+      yearMax: '',
+      runtimeMin: '200',
+      runtimeMax: '100',
+    });
+    component['submitAdvancedSearch'](new Event('submit'));
+    expect(component['advancedSearchError']()).toBe(
+      'Minimum runtime must be no greater than maximum runtime.',
+    );
+
+    component['advancedSearchDraft'].update((current) => ({
+      ...current,
+      runtimeMin: '',
+      runtimeMax: '',
+      imdbRatingMin: '9',
+      imdbRatingMax: '4',
+    }));
+    component['submitAdvancedSearch'](new Event('submit'));
+    expect(component['advancedSearchError']()).toBe(
+      'Minimum IMDb rating must be no greater than maximum rating.',
+    );
+
+    component['advancedSearchDraft'].update((current) => ({
+      ...current,
+      imdbRatingMin: '',
+      imdbRatingMax: '',
+      metacriticMin: '80',
+      metacriticMax: '20',
+    }));
+    component['submitAdvancedSearch'](new Event('submit'));
+    expect(component['advancedSearchError']()).toBe(
+      'Minimum Metacritic score must be no greater than maximum score.',
+    );
+
+    component['advancedSearchDraft'].update((current) => ({
+      ...current,
+      metacriticMin: '',
+      metacriticMax: '',
+      yearMin: 'not-a-number',
+    }));
+    component['submitAdvancedSearch'](new Event('submit'));
+    expect(component['advancedSearchError']()).toBe('Enter valid numbers for the range filters.');
+    httpTesting.expectNone((request) => request.url === '/api/movies');
   });
 
   it('uses backend pagination metadata to navigate pages and show the total film count', () => {
@@ -622,6 +696,85 @@ describe('DiscoverPage', () => {
     expect(fixture.nativeElement.querySelector('.pagination-controls')?.textContent).toContain(
       'Page 1 of 334',
     );
+  });
+
+  it('rejects invalid pages and restarts a pending search from page one', () => {
+    fixture.componentInstance['goToPage'](0);
+    fixture.componentInstance['goToPage'](335);
+    httpTesting.expectNone((request) => request.url === '/api/movies');
+
+    jasmine.clock().install();
+    try {
+      setInputValue(
+        fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
+        'Arr',
+      );
+      fixture.detectChanges();
+      setInputValue(
+        fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
+        'Arrival',
+      );
+      fixture.detectChanges();
+      fixture.componentInstance['loadMovies']();
+      fixture.detectChanges();
+      flushMoviesRequest(httpTesting, movieResponse, [], 1, 'Arrival');
+      fixture.detectChanges();
+
+      setInputValue(
+        fixture.nativeElement.querySelector('[aria-label="Search movies"]') as HTMLInputElement,
+        'Arrival now',
+      );
+      fixture.detectChanges();
+      (
+        fixture.nativeElement.querySelectorAll(
+          '.pagination-controls .page-button',
+        )[1] as HTMLButtonElement
+      ).click();
+      fixture.detectChanges();
+      flushMoviesRequest(httpTesting, movieResponse, [], 1, 'Arrival now');
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.pagination-controls')?.textContent).toContain(
+        'Page 1 of 334',
+      );
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  it('ignores invalid sort events and allows deselecting a genre', () => {
+    fixture.componentInstance['updateMovieSort'](new Event('change'));
+    fixture.componentInstance['updateSortOrder'](new Event('change'));
+    const sort = fixture.nativeElement.querySelector(
+      '[aria-label="Sort films"]',
+    ) as HTMLSelectElement;
+    sort.value = 'not-a-sort';
+    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    const order = fixture.nativeElement.querySelector(
+      '[aria-label="Sort direction"]',
+    ) as HTMLSelectElement;
+    order.value = 'sideways';
+    order.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    httpTesting.expectNone((request) => request.url === '/api/movies');
+
+    const drama = Array.from(
+      fixture.nativeElement.querySelectorAll('.genre-pill') as NodeListOf<HTMLButtonElement>,
+    ).find((button) => button.textContent?.trim() === 'Drama') as HTMLButtonElement;
+    drama.click();
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse, ['Drama']);
+    fixture.detectChanges();
+    drama.click();
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse);
+    fixture.detectChanges();
+    expect(
+      (Array.from(
+        fixture.nativeElement.querySelectorAll('.genre-pill') as NodeListOf<HTMLButtonElement>,
+      ).find((button) => button.textContent?.trim() === 'Drama') as HTMLButtonElement).getAttribute(
+        'aria-pressed',
+      ),
+    ).toBe('false');
   });
 
   it('reports a movie response that is missing pagination metadata', () => {
@@ -880,6 +1033,44 @@ describe('DiscoverPage', () => {
     httpTesting.expectNone((request) => request.url.startsWith('/api/movies/'));
   });
 
+  it('reports a saved movie detail request failure in the watchlist', () => {
+    window.localStorage.setItem('mosaic.watchlist.v1.guest', JSON.stringify(['missing-movie']));
+    fixture.destroy();
+    fixture = TestBed.createComponent(DiscoverPage);
+    fixture.detectChanges();
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+
+    (
+      fixture.nativeElement.querySelector('.side-nav button') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    httpTesting
+      .expectOne('/api/movies/missing-movie')
+      .flush({ error: 'Unavailable' }, { status: 503, statusText: 'Service Unavailable' });
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Request failed (503).');
+    expect(fixture.nativeElement.textContent).toContain('Could not load films');
+  });
+
+  it('returns to the catalog from watchlist mode', () => {
+    fixture.componentInstance['showWatchlist'].set(true);
+    fixture.componentInstance['showDiscover']();
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.side-nav a')?.classList).toContain('active');
+    expect(fixture.nativeElement.querySelector('.side-nav button')?.classList).not.toContain(
+      'active',
+    );
+    expect(fixture.nativeElement.querySelector('.catalog-heading h2')?.textContent).toContain(
+      'A little of everything',
+    );
+  });
+
   it('switches between guest and user-specific watchlists on login and logout', () => {
     window.localStorage.setItem('mosaic.watchlist.v1.guest', JSON.stringify(['movie-456']));
     window.localStorage.setItem(
@@ -1000,6 +1191,7 @@ describe('DiscoverPage', () => {
   it('ignores invalid comment events and guards against duplicate or unauthenticated actions', () => {
     fixture.componentInstance['onCommentNameInput'](new Event('input'));
     fixture.componentInstance['onAuthInput'](new Event('input'), 'email');
+    fixture.componentInstance['onPosterError'](new Event('error'));
     fixture.componentInstance['submitLogout']();
     fixture.componentInstance['submitComment'](new SubmitEvent('submit'));
     httpTesting.expectNone('/api/comments');
@@ -1282,6 +1474,211 @@ describe('DiscoverPage', () => {
     expect(window.localStorage.getItem('mosaic.auth.v1')).toBeNull();
     expect(fixture.nativeElement.textContent).toContain(
       'Signed out here, but the server could not end the session: Logout unavailable',
+    );
+  });
+
+  it('renders detail fallbacks and the transient comments loading state', () => {
+    fixture.destroy();
+    fixture = TestBed.createComponent(DiscoverPage);
+    fixture.detectChanges();
+    flushGenresRequest(httpTesting);
+    flushMoviesRequest(httpTesting, {
+      data: [{ _id: 'sparse', title: 'Sparse film' }],
+      pagination: {
+        page: 1,
+        limit: 30,
+        total: 1,
+        pages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      },
+    });
+    fixture.detectChanges();
+
+    (fixture.nativeElement.querySelector('.feature-button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Loading comments...');
+    expect(fixture.nativeElement.textContent).toContain('Feature film');
+    expect(fixture.nativeElement.textContent).toContain('No synopsis is available for this film yet.');
+    expect(fixture.nativeElement.textContent).toContain('Not listed');
+
+    httpTesting.expectOne('/api/comments?movieId=sparse').flush([]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Be the first to leave a thought.');
+
+    (fixture.nativeElement.querySelector('.movie-title') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    httpTesting.expectOne('/api/comments?movieId=sparse').flush([]);
+    fixture.detectChanges();
+
+    (
+      fixture.nativeElement.querySelector('[aria-label="Close film details"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('reports plain errors from movie and comment requests', () => {
+    const http = TestBed.inject(HttpClient);
+    const movie = fixture.componentInstance['movies']()[0];
+    const get = spyOn(http, 'get').and.returnValue(
+      throwError(() => 'unexpected movie transport failure'),
+    );
+
+    fixture.componentInstance['loadMovies']();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Could not load films.');
+
+    get.and.returnValue(throwError(() => 'unexpected comments transport failure'));
+    fixture.componentInstance['openMovie'](movie);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Could not load comments.');
+
+    spyOn(http, 'post').and.returnValue(
+      throwError(() => 'unexpected comment submission failure'),
+    );
+    fixture.componentInstance['commentName'].set('Morgan');
+    fixture.componentInstance['commentText'].set('A useful thought.');
+    fixture.componentInstance['submitComment'](new SubmitEvent('submit'));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Could not post your comment.');
+  });
+
+  it('covers registration loading and non-Error registration failures', () => {
+    const authApi = TestBed.inject(AuthApi);
+    const registrationResponse = new Subject<void>();
+    spyOn(authApi, 'register').and.returnValue(registrationResponse);
+    (
+      fixture.nativeElement.querySelector('button[aria-label="Open login menu"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    (
+      Array.from(
+        fixture.nativeElement.querySelectorAll('.account-switch') as NodeListOf<HTMLButtonElement>,
+      ).find((button) => button.textContent?.includes('Create one')) as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="username"]') as HTMLInputElement,
+      'Morgan Lee',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="email"]') as HTMLInputElement,
+      'morgan@example.com',
+    );
+    const passwords = fixture.nativeElement.querySelectorAll(
+      '[autocomplete="new-password"]',
+    ) as NodeListOf<HTMLInputElement>;
+    setInputValue(passwords[0], 'correct-password');
+    setInputValue(passwords[1], 'correct-password');
+    submit(fixture.nativeElement.querySelector('.account-form') as HTMLFormElement);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Creating account…');
+    registrationResponse.error('registration failed');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Could not create your account.');
+  });
+
+  it('handles session storage failures without hiding the signed-in session', () => {
+    const authApi = TestBed.inject(AuthApi);
+    const session: AuthSession = {
+      token: 'test-token',
+      user: { id: 'user-storage', name: 'Storage User', email: 'storage@example.com' },
+    };
+    spyOn(authApi, 'login').and.returnValue(of(session));
+    const originalSetItem = window.localStorage.setItem.bind(window.localStorage);
+    spyOn(window.localStorage, 'setItem').and.callFake((key, value) => {
+      if (key === 'mosaic.auth.v1') {
+        throw new Error('Storage disabled');
+      }
+      originalSetItem(key, value);
+    });
+
+    (
+      fixture.nativeElement.querySelector('button[aria-label="Open login menu"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="email"]') as HTMLInputElement,
+      'storage@example.com',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="current-password"]') as HTMLInputElement,
+      'correct-password',
+    );
+    submit(fixture.nativeElement.querySelector('.account-form') as HTMLFormElement);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'You are signed in, but this browser could not save your session.',
+    );
+    expect(fixture.nativeElement.textContent).toContain('Storage User');
+    expect(fixture.nativeElement.querySelector('.account-dropdown')).toBeTruthy();
+  });
+
+  it('reloads the selected account watchlist when signing in from watchlist mode', () => {
+    const authApi = TestBed.inject(AuthApi);
+    const session: AuthSession = {
+      token: 'test-token',
+      user: { id: 'watchlist-user', name: 'Watchlist User', email: 'list@example.com' },
+    };
+    spyOn(authApi, 'login').and.returnValue(of(session));
+    fixture.componentInstance['showWatchlist'].set(true);
+
+    fixture.componentInstance['submitLogin'](new SubmitEvent('submit'));
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance['authSession']()?.user.id).toBe('watchlist-user');
+    expect(fixture.componentInstance['currentPage']()).toBe(1);
+    expect(fixture.componentInstance['movies']()).toEqual([]);
+    expect(fixture.componentInstance['isLoading']()).toBeFalse();
+  });
+
+  it('uses the generic auth errors and clears local state when logout fails', () => {
+    const authApi = TestBed.inject(AuthApi);
+    const session: AuthSession = {
+      token: 'test-token',
+      user: { id: 'user-plain-error', name: 'Plain Error', email: 'plain@example.com' },
+    };
+    const login = spyOn(authApi, 'login').and.returnValue(
+      throwError(() => 'login failed'),
+    );
+
+    (
+      fixture.nativeElement.querySelector('button[aria-label="Open login menu"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="email"]') as HTMLInputElement,
+      'plain@example.com',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="current-password"]') as HTMLInputElement,
+      'correct-password',
+    );
+    submit(fixture.nativeElement.querySelector('.account-form') as HTMLFormElement);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Could not sign in.');
+
+    login.and.returnValue(of(session));
+    setInputValue(
+      fixture.nativeElement.querySelector('[autocomplete="current-password"]') as HTMLInputElement,
+      'correct-password',
+    );
+    submit(fixture.nativeElement.querySelector('.account-form') as HTMLFormElement);
+    fixture.detectChanges();
+    expect(fixture.componentInstance['authSession']()?.user.name).toBe('Plain Error');
+
+    fixture.componentInstance['showWatchlist'].set(true);
+    spyOn(authApi, 'logout').and.returnValue(throwError(() => 'logout failed'));
+    spyOn(window.localStorage, 'removeItem').and.throwError('Storage disabled');
+    fixture.componentInstance['submitLogout']();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance['authSession']()).toBeNull();
+    expect(fixture.componentInstance['authError']()).toContain(
+      'Signed out, but this browser could not clear the saved session.',
     );
   });
 });
