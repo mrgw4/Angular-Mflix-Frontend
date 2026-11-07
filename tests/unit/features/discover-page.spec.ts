@@ -13,6 +13,10 @@ const movieResponse = {
       year: 2025,
       genres: ['Drama', 'Mystery'],
       imdb: { rating: 8.7 },
+      tomatoes: {
+        viewer: { meter: 91, rating: 4.4, numReviews: 25000 },
+        critic: { meter: 88, rating: 7.5, numReviews: 120 },
+      },
       fullplot: 'A story from the backend.',
       directors: ['Mara Ellison'],
       cast: ['Nina Park'],
@@ -164,6 +168,27 @@ describe('DiscoverPage', () => {
     );
     expect(fixture.componentInstance['featuredBackground'](movies[0])).not.toContain('url(');
     expect(fixture.componentInstance['detailBackground'](movies[0])).not.toContain('url(');
+  });
+
+  it('shows Rotten Tomatoes audience and critic details for a film', () => {
+    const movieButton = fixture.nativeElement.querySelector(
+      '.movie-title',
+    ) as HTMLButtonElement;
+    movieButton.click();
+    httpTesting.expectOne(
+      (request) =>
+        request.url === '/api/comments' && request.params.get('movieId') === 'movie-123',
+    ).flush({ comments: [] });
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.tomatoes-score')?.textContent?.trim()).toBe(
+      'RT 91%',
+    );
+    const detailText = fixture.nativeElement.querySelector('.film-facts')?.textContent ?? '';
+    expect(detailText).toContain('91%');
+    expect(detailText).toContain('4.4/5 · 25,000 ratings');
+    expect(detailText).toContain('88% · 120 reviews');
+    expect(detailText).toContain('7.5/10');
   });
 
   it('loads and posts comments from the film details dialog', () => {
@@ -476,6 +501,24 @@ describe('DiscoverPage', () => {
     flushMoviesRequest(httpTesting, movieResponse, [], 1, null, 'imdbRating');
     fixture.detectChanges();
 
+    sortFilms.value = 'tomatoesMeter';
+    sortFilms.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse, [], 1, null, 'tomatoesMeter');
+    fixture.detectChanges();
+
+    sortFilms.value = 'tomatoesRating';
+    sortFilms.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse, [], 1, null, 'tomatoesRating');
+    fixture.detectChanges();
+
+    sortFilms.value = 'imdbRating';
+    sortFilms.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    flushMoviesRequest(httpTesting, movieResponse, [], 1, null, 'imdbRating');
+    fixture.detectChanges();
+
     const sortDirection = fixture.nativeElement.querySelector(
       '[aria-label="Sort direction"]',
     ) as HTMLSelectElement;
@@ -504,6 +547,18 @@ describe('DiscoverPage', () => {
     setInputValue(
       fixture.nativeElement.querySelector('[aria-label="Minimum Metacritic score"]') as HTMLInputElement,
       '50',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector(
+        '[aria-label="Minimum Rotten Tomatoes audience score"]',
+      ) as HTMLInputElement,
+      '80',
+    );
+    setInputValue(
+      fixture.nativeElement.querySelector(
+        '[aria-label="Maximum Rotten Tomatoes audience rating"]',
+      ) as HTMLInputElement,
+      '4.5',
     );
     fixture.detectChanges();
     (
@@ -535,6 +590,8 @@ describe('DiscoverPage', () => {
         runtimeMax: '150',
         imdbRatingMin: '7.5',
         metacriticMin: '50',
+        tomatoesMeterMin: '80',
+        tomatoesRatingMax: '4.5',
       },
     );
     fixture.detectChanges();
@@ -621,6 +678,30 @@ describe('DiscoverPage', () => {
       ...current,
       metacriticMin: '',
       metacriticMax: '',
+      tomatoesMeterMin: '90',
+      tomatoesMeterMax: '80',
+    }));
+    component['submitAdvancedSearch'](new Event('submit'));
+    expect(component['advancedSearchError']()).toBe(
+      'Minimum Rotten Tomatoes audience score must be no greater than maximum score.',
+    );
+
+    component['advancedSearchDraft'].update((current) => ({
+      ...current,
+      tomatoesMeterMin: '',
+      tomatoesMeterMax: '',
+      tomatoesRatingMin: '4.5',
+      tomatoesRatingMax: '4',
+    }));
+    component['submitAdvancedSearch'](new Event('submit'));
+    expect(component['advancedSearchError']()).toBe(
+      'Minimum Rotten Tomatoes audience rating must be no greater than maximum rating.',
+    );
+
+    component['advancedSearchDraft'].update((current) => ({
+      ...current,
+      tomatoesRatingMin: '',
+      tomatoesRatingMax: '',
       yearMin: 'not-a-number',
     }));
     component['submitAdvancedSearch'](new Event('submit'));
@@ -927,6 +1008,10 @@ describe('DiscoverPage', () => {
         rated: 'PG',
         type: 'movie',
         metacritic: 80,
+        tomatoes: {
+          viewer: { meter: 94, rating: 4.6, numReviews: 1000 },
+          critic: { meter: 90, rating: 8, numReviews: 500 },
+        },
         released: '2020-01-01',
       },
       {
@@ -942,6 +1027,10 @@ describe('DiscoverPage', () => {
         rated: 'PG-13',
         type: 'series',
         metacritic: null,
+        tomatoes: {
+          viewer: { meter: 70, rating: 3.8, numReviews: 200 },
+          critic: { meter: 65, rating: 6, numReviews: 100 },
+        },
         released: '2010-01-01',
       },
     ];
@@ -1006,6 +1095,10 @@ describe('DiscoverPage', () => {
     expect(applyFilters({ imdbRatingMin: 8 })).toEqual(['Quiet Story']);
     expect(applyFilters({ imdbRatingMax: 7 })).toEqual(['Other Worlds']);
     expect(applyFilters({ metacriticMin: 1 })).toEqual(['Quiet Story']);
+    expect(applyFilters({ tomatoesMeterMin: 90 })).toEqual(['Quiet Story']);
+    expect(applyFilters({ tomatoesMeterMax: 80 })).toEqual(['Other Worlds']);
+    expect(applyFilters({ tomatoesRatingMin: 4 })).toEqual(['Quiet Story']);
+    expect(applyFilters({ tomatoesRatingMax: 4 })).toEqual(['Other Worlds']);
 
     for (const sort of [
       'title',
@@ -1014,10 +1107,28 @@ describe('DiscoverPage', () => {
       'released',
       'metacritic',
       'imdbRating',
+      'tomatoesMeter',
+      'tomatoesRating',
     ] as const) {
       expect(applyFilters({ sort, order: 'asc' }).length).toBe(2);
       expect(applyFilters({ sort, order: 'desc' }).length).toBe(2);
     }
+    expect(applyFilters({ sort: 'tomatoesMeter', order: 'asc' })).toEqual([
+      'Other Worlds',
+      'Quiet Story',
+    ]);
+    expect(applyFilters({ sort: 'tomatoesMeter', order: 'desc' })).toEqual([
+      'Quiet Story',
+      'Other Worlds',
+    ]);
+    expect(applyFilters({ sort: 'tomatoesRating', order: 'asc' })).toEqual([
+      'Other Worlds',
+      'Quiet Story',
+    ]);
+    expect(applyFilters({ sort: 'tomatoesRating', order: 'desc' })).toEqual([
+      'Quiet Story',
+      'Other Worlds',
+    ]);
     fixture.componentInstance['sortByRating'].set(true);
     expect(applyFilters().length).toBe(2);
   });

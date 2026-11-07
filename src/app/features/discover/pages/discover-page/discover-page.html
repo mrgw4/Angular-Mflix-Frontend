@@ -599,7 +599,61 @@
                   />
                 </label>
               </fieldset>
-            </div>
+              <fieldset class="advanced-search-range">
+                <legend>Rotten Tomatoes audience score (0-100)</legend>
+                <label>
+                  Min
+                  <input
+                    aria-label="Minimum Rotten Tomatoes audience score"
+                    max="100"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().tomatoesMeterMin"
+                    (input)="onAdvancedSearchInput('tomatoesMeterMin', $event)"
+                  />
+                </label>
+                <label>
+                  Max
+                  <input
+                    aria-label="Maximum Rotten Tomatoes audience score"
+                    max="100"
+                    min="0"
+                    step="1"
+                    type="number"
+                    [value]="advancedSearchDraft().tomatoesMeterMax"
+                    (input)="onAdvancedSearchInput('tomatoesMeterMax', $event)"
+                  />
+                </label>
+              </fieldset>
+              <fieldset class="advanced-search-range">
+                <legend>Rotten Tomatoes audience rating (0-5)</legend>
+                <label>
+                  Min
+                  <input
+                    aria-label="Minimum Rotten Tomatoes audience rating"
+                    max="5"
+                    min="0"
+                    step="0.1"
+                    type="number"
+                    [value]="advancedSearchDraft().tomatoesRatingMin"
+                    (input)="onAdvancedSearchInput('tomatoesRatingMin', $event)"
+                  />
+                </label>
+                <label>
+                  Max
+                  <input
+                    aria-label="Maximum Rotten Tomatoes audience rating"
+                    max="5"
+                    min="0"
+                    step="0.1"
+                    type="number"
+                    [value]="advancedSearchDraft().tomatoesRatingMax"
+                    (input)="onAdvancedSearchInput('tomatoesRatingMax', $event)"
+                  />
+                </label>
+              </fieldset>
+              </div>
             @if (advancedSearchError()) {
               <p class="advanced-search-error" role="alert">{{ advancedSearchError() }}</p>
             }
@@ -692,6 +746,17 @@
                   <div class="movie-subline">
                     <span>{{ movie.year || '—' }}</span
                     ><i></i>{{ movie.genres.slice(0, 2).join(' · ') }}
+                    @if (movie.tomatoes.viewerMeter !== null) {
+                      <i></i>
+                      <span
+                        class="tomatoes-score"
+                        [attr.aria-label]="
+                          'Rotten Tomatoes audience score ' + movie.tomatoes.viewerMeter + '%'
+                        "
+                      >
+                        RT {{ movie.tomatoes.viewerMeter }}%
+                      </span>
+                    }
                   </div>
                 </div>
               </article>
@@ -804,6 +869,54 @@
               </div>
               <div>
                 <span>STARRING</span><strong>{{ movie.cast.join(', ') || 'Not listed' }}</strong>
+              </div>
+              <div>
+                <span>ROTTEN TOMATOES AUDIENCE SCORE</span>
+                <strong>
+                  {{
+                    movie.tomatoes.viewerMeter === null
+                      ? 'Not rated'
+                      : movie.tomatoes.viewerMeter + '%'
+                  }}
+                </strong>
+              </div>
+              <div>
+                <span>ROTTEN TOMATOES AUDIENCE RATING</span>
+                <strong>
+                  {{
+                    movie.tomatoes.viewerRating === null
+                      ? 'Not rated'
+                      : movie.tomatoes.viewerRating +
+                        '/5' +
+                        (movie.tomatoes.viewerNumReviews === null
+                          ? ''
+                          : ' · ' + movie.tomatoes.viewerNumReviews.toLocaleString() + ' ratings')
+                  }}
+                </strong>
+              </div>
+              <div>
+                <span>ROTTEN TOMATOES TOMATOMETER</span>
+                <strong>
+                  {{
+                    movie.tomatoes.criticMeter === null
+                      ? 'Not rated'
+                      : movie.tomatoes.criticMeter +
+                        '%' +
+                        (movie.tomatoes.criticNumReviews === null
+                          ? ''
+                          : ' · ' + movie.tomatoes.criticNumReviews.toLocaleString() + ' reviews')
+                  }}
+                </strong>
+              </div>
+              <div>
+                <span>ROTTEN TOMATOES CRITIC RATING</span>
+                <strong>
+                  {{
+                    movie.tomatoes.criticRating === null
+                      ? 'Not rated'
+                      : movie.tomatoes.criticRating + '/10'
+                  }}
+                </strong>
               </div>
             </div>
           </div>

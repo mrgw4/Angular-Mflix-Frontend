@@ -27,6 +27,14 @@ interface Movie {
   rated: string;
   type: string;
   metacritic: number | null;
+  tomatoes: {
+    viewerMeter: number | null;
+    viewerRating: number | null;
+    viewerNumReviews: number | null;
+    criticMeter: number | null;
+    criticRating: number | null;
+    criticNumReviews: number | null;
+  };
   released: string;
   posterUrl: string;
 }
@@ -66,7 +74,11 @@ type AdvancedSearchField =
   | 'imdbRatingMin'
   | 'imdbRatingMax'
   | 'metacriticMin'
-  | 'metacriticMax';
+  | 'metacriticMax'
+  | 'tomatoesMeterMin'
+  | 'tomatoesMeterMax'
+  | 'tomatoesRatingMin'
+  | 'tomatoesRatingMax';
 
 type AdvancedSearchDraft = Record<AdvancedSearchField, string>;
 
@@ -85,7 +97,19 @@ interface AdvancedSearchFilters {
   imdbRatingMax?: number;
   metacriticMin?: number;
   metacriticMax?: number;
-  sort?: 'title' | 'year' | 'runtime' | 'released' | 'metacritic' | 'imdbRating';
+  tomatoesMeterMin?: number;
+  tomatoesMeterMax?: number;
+  tomatoesRatingMin?: number;
+  tomatoesRatingMax?: number;
+  sort?:
+    | 'title'
+    | 'year'
+    | 'runtime'
+    | 'released'
+    | 'metacritic'
+    | 'imdbRating'
+    | 'tomatoesMeter'
+    | 'tomatoesRating';
   order?: 'asc' | 'desc';
 }
 
@@ -106,6 +130,10 @@ const emptyAdvancedSearch: AdvancedSearchDraft = {
   imdbRatingMax: '',
   metacriticMin: '',
   metacriticMax: '',
+  tomatoesMeterMin: '',
+  tomatoesMeterMax: '',
+  tomatoesRatingMin: '',
+  tomatoesRatingMax: '',
 };
 const movieSortOptions = [
   { value: 'year', label: 'Newest year' },
@@ -114,6 +142,8 @@ const movieSortOptions = [
   { value: 'runtime', label: 'Runtime' },
   { value: 'released', label: 'Release date' },
   { value: 'metacritic', label: 'Metacritic score' },
+  { value: 'tomatoesMeter', label: 'Rotten Tomatoes audience score' },
+  { value: 'tomatoesRating', label: 'Rotten Tomatoes audience rating' },
 ] as const;
 const emptyPagination: MoviePagination = {
   page: 1,
@@ -153,9 +183,24 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
+function asOptionalNumber(value: unknown): number | null {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    value === '' ||
+    (typeof value === 'string' && !value.trim())
+  ) {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function normalizeMovie(value: unknown, index: number): Movie {
   const movie = asRecord(value);
   const imdb = asRecord(movie['imdb']);
+  const tomatoes = asRecord(movie['tomatoes']);
+  const tomatoesViewer = asRecord(tomatoes['viewer']);
+  const tomatoesCritic = asRecord(tomatoes['critic']);
   const directors = asStringArray(movie['directors'] ?? movie['director']);
   const metacritic = Number(movie['metacritic']);
 
@@ -177,6 +222,14 @@ function normalizeMovie(value: unknown, index: number): Movie {
       Number.isFinite(metacritic) && movie['metacritic'] !== null && movie['metacritic'] !== undefined
         ? metacritic
         : null,
+    tomatoes: {
+      viewerMeter: asOptionalNumber(tomatoesViewer['meter']),
+      viewerRating: asOptionalNumber(tomatoesViewer['rating']),
+      viewerNumReviews: asOptionalNumber(tomatoesViewer['numReviews']),
+      criticMeter: asOptionalNumber(tomatoesCritic['meter']),
+      criticRating: asOptionalNumber(tomatoesCritic['rating']),
+      criticNumReviews: asOptionalNumber(tomatoesCritic['numReviews']),
+    },
     released: asString(movie['released']),
     posterUrl: asString(
       movie['posterUrl'] ?? movie['poster_url'] ?? movie['poster'] ?? movie['image'],
@@ -366,6 +419,8 @@ function filterWatchlistMovies(
       [movie.runtime, filters.runtimeMin, filters.runtimeMax],
       [movie.rating, filters.imdbRatingMin, filters.imdbRatingMax],
       [movie.metacritic, filters.metacriticMin, filters.metacriticMax],
+      [movie.tomatoes.viewerMeter, filters.tomatoesMeterMin, filters.tomatoesMeterMax],
+      [movie.tomatoes.viewerRating, filters.tomatoesRatingMin, filters.tomatoesRatingMax],
     ] as const;
     return rangeFilters.every(([value, minimum, maximum]) => {
       if (minimum === undefined && maximum === undefined) {
@@ -383,18 +438,22 @@ function filterWatchlistMovies(
 function getMovieSortValue(
   movie: Movie,
   sort: NonNullable<AdvancedSearchFilters['sort']>,
-): number | string {
+): number | string | null {
   switch (sort) {
     case 'title':
       return movie.title.toLocaleLowerCase();
     case 'runtime':
       return movie.runtime;
     case 'metacritic':
-      return movie.metacritic ?? -1;
+      return movie.metacritic;
     case 'released':
       return Date.parse(movie.released) || movie.year;
     case 'imdbRating':
       return movie.rating;
+    case 'tomatoesMeter':
+      return movie.tomatoes.viewerMeter;
+    case 'tomatoesRating':
+      return movie.tomatoes.viewerRating;
     case 'year':
     default:
       return movie.year;
@@ -411,6 +470,12 @@ function sortWatchlistMovies(
   return [...movies].sort((first, second) => {
     const firstValue = getMovieSortValue(first, sort);
     const secondValue = getMovieSortValue(second, sort);
+    if (firstValue === null || secondValue === null) {
+      if (firstValue === secondValue) {
+        return 0;
+      }
+      return firstValue === null ? 1 : -1;
+    }
     const comparison =
       typeof firstValue === 'string' && typeof secondValue === 'string'
         ? firstValue.localeCompare(secondValue)
@@ -705,6 +770,10 @@ export class DiscoverPage {
       'imdbRatingMax',
       'metacriticMin',
       'metacriticMax',
+      'tomatoesMeterMin',
+      'tomatoesMeterMax',
+      'tomatoesRatingMin',
+      'tomatoesRatingMax',
     ] as const) {
       const value = filters[field];
       if (value !== undefined) {
@@ -741,6 +810,16 @@ export class DiscoverPage {
         'metacriticMax',
         'Minimum Metacritic score must be no greater than maximum score.',
       ],
+      [
+        'tomatoesMeterMin',
+        'tomatoesMeterMax',
+        'Minimum Rotten Tomatoes audience score must be no greater than maximum score.',
+      ],
+      [
+        'tomatoesRatingMin',
+        'tomatoesRatingMax',
+        'Minimum Rotten Tomatoes audience rating must be no greater than maximum rating.',
+      ],
     ] as const;
     for (const [minimumField, maximumField, message] of ranges) {
       const minimum = draft[minimumField];
@@ -770,6 +849,10 @@ export class DiscoverPage {
       'imdbRatingMax',
       'metacriticMin',
       'metacriticMax',
+      'tomatoesMeterMin',
+      'tomatoesMeterMax',
+      'tomatoesRatingMin',
+      'tomatoesRatingMax',
     ] as const) {
       const value = draft[field];
       if (value !== '') {
