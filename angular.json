@@ -83,9 +83,9 @@
           "options": {
             "runner": "karma",
             "runnerConfig": "karma.conf.js",
-            "include": ["../tests/unit/**/*.spec.ts"],
+            "include": ["../tests/unit/**/*.spec.ts", "../tests/integration/**/*.spec.ts"],
             "coverageThresholds": {
-              "branches": 90
+              "branches": 95
             }
           }
         }

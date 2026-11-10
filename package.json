@@ -8,7 +8,10 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test --browsers=ChromeHeadless",
     "test:coverage": "ng test --coverage --browsers=ChromeHeadless",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "start:cypress": "ng serve --host 127.0.0.1 --port 4300",
+    "cypress:run": "cypress run",
+    "test:cypress": "start-server-and-test start:cypress http://127.0.0.1:4300 cypress:run"
   },
   "private": true,
   "packageManager": "npm@11.17.0",
@@ -28,6 +31,7 @@
     "@angular/compiler-cli": "^22.2.0",
     "@playwright/test": "^1.63.0",
     "@types/jasmine": "~6.0.0",
+    "cypress": "^16.2.1",
     "istanbul-lib-instrument": "^6.0.3",
     "jasmine-core": "~6.3.0",
     "karma": "~6.4.0",
@@ -36,6 +40,7 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.3.0",
     "prettier": "^3.8.1",
+    "start-server-and-test": "^3.0.13",
     "typescript": "~6.0.2"
   }
 }

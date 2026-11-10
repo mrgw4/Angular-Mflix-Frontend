@@ -523,13 +523,16 @@ test('isolates guest, first-user, and second-user watchlists across sign-in chan
   });
 
   async function logIn(email: string, name: string): Promise<void> {
-    if (await page.locator('.account-form').count() === 0) {
-      await page.getByRole('button', { name: 'Open login menu' }).click();
+    if ((await page.locator('.account-dropdown').count()) === 0) {
+      await page.getByRole('button', { name: /Open login menu|Account menu for/ }).click();
     }
     const form = page.locator('.account-form');
+    await expect(form).toBeVisible();
     await form.locator('[autocomplete="email"]').fill(email);
     await form.locator('[autocomplete="current-password"]').fill('correct-password');
-    await form.getByRole('button', { name: 'Log in' }).click();
+    await form
+      .getByRole('button', { name: 'Log in' })
+      .evaluate((button: HTMLButtonElement) => button.click());
     await expect(page.getByRole('button', { name: `Account menu for ${name}` })).toBeVisible();
   }
 
